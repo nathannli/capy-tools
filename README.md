@@ -2,38 +2,30 @@
 
 Standalone basic tools for pi.
 
-This package bundles a practical set of editing, file-navigation, fetch, web-reference, and built-in search activation extensions split out from `pi-goodstuff`.
+This package bundles a practical set of editing, fetch, web-reference, and built-in search activation extensions split out from `pi-goodstuff`.
 
 ## Included extensions
 
-- `multi-edit`
-- `files`
+- `apply-patch` (`apply_patch` tool)
 - `fetch`
 - `enable-builtin-search` (activates pi's built-in `grep`, `find`, and `ls` tools)
-- `basic-tools` (question)
-- `answer`
+- `repo-map` (`repo_map` tool)
+- `read-block` (`read_block` tool)
+- `question`
+- `questionnaire`
 - `sourcegraph`
 
 ## Core helper tools
 
-`basic-tools` adds small, session-friendly tools that make common agent workflows safer:
+`repo_map` generates a compact project orientation map: root, git state, manifests, language mix, important files, directory clusters, and recent changes.
 
-- `question`: ask the user a focused question with optional choices and free-text fallback.
+`read_block` reads the enclosing code or Markdown block around a line or symbol, so agents can inspect the right semantic unit without guessing offset/limit ranges.
+
+`question` adds a small, session-friendly tool for asking the user a focused question with optional choices and free-text fallback.
+
+`questionnaire` adds a multi-question TUI for batching related questions with suggested options, recommended defaults, free-text answers, and a submit review screen.
 
 > Looking for task tracking? `todo` is no longer shipped here. Install [`@tintinweb/pi-tasks`](https://github.com/tintinweb/pi-tasks) for `TaskCreate`/`TaskList`/`TaskUpdate` and friends.
-
-### Tool toggles
-
-Use `/basic-tools-settings` to toggle these tools without editing package files:
-
-```text
-/basic-tools-settings
-/basic-tools-settings list
-/basic-tools-settings enable question
-/basic-tools-settings disable all
-```
-
-Settings are stored in `~/.pi/agent/basic-tools-settings.json`. Startup/reload applies the settings, while explicit no-tools sessions are respected.
 
 ### Built-in search activation
 
@@ -41,9 +33,13 @@ Settings are stored in `~/.pi/agent/basic-tools-settings.json`. Startup/reload a
 
 ## Runtime requirements and dependencies
 
+### Pi core package scope
+
+Pi core packages have moved from `@mariozechner/*` to `@earendil-works/*`. This package imports and tests against the new scope (`@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui`) and keeps them as peer dependencies so pi supplies its own core runtime.
+
 ### Bundled in this package
 
-`multi-edit` vendors the line-diff implementation from `diff@8.0.2` under `vendor/diff/`, so it does not require `node_modules` or a post-`pi update` `npm install` step.
+`apply-patch` vendors the line-diff implementation from `diff@8.0.2` under `vendor/diff/`, so it does not require `node_modules` or a post-`pi update` `npm install` step.
 
 ### External tools you must provide
 
@@ -57,7 +53,7 @@ Settings are stored in `~/.pi/agent/basic-tools-settings.json`. Startup/reload a
 Install the pi package:
 
 ```bash
-pi install git:github.com/lulucatdev/pi-basic-tools
+pi install git:github.com/capyup/pi-basic-tools
 ```
 
 Install `pipx` if it is not already available:
@@ -91,12 +87,25 @@ If pi is already running, reload extensions after installing or updating depende
 /reload
 ```
 
+## Testing
+
+The test suite is strict by default: it uses real filesystem operations, real `git`, live network calls to `example.com` and Sourcegraph, and the real MarkItDown CLI. Missing dependencies are expected to fail tests instead of being mocked or skipped.
+
+```bash
+npm install
+npm test
+npm run test:build
+npm run check
+```
+
+Test coverage includes `apply_patch`, `repo_map`, `read_block`, `question`, `questionnaire`, `fetch`, `sourcegraph`, `enable-builtin-search`, and package wiring. See [`docs/testing.md`](docs/testing.md) for the dependency checklist, public research summary, and recommended pi extension testing workflow.
+
 ## Update
 
 Update this package inside pi:
 
 ```bash
-pi update git:github.com/lulucatdev/pi-basic-tools
+pi update git:github.com/capyup/pi-basic-tools
 ```
 
 If you need to update MarkItDown as well:
@@ -157,7 +166,6 @@ read .pi/fetch/<timestamp>-<slug>/meta.json
 Good candidates for later `pi-basic-tools` additions:
 
 - `diagnostics` / `check`: run project-aware lint/test/typecheck commands with structured, compressed results.
-- `repo_map`: summarize important files, symbols, and dependency edges for quick orientation.
 - `symbols`: LSP or Serena-backed `find_symbol`, `references`, and safe rename/replace helpers.
 - Structured git write tools: guarded branch/commit helpers that never hide dirty worktree risk.
 - Context utilities: inspect active tools, model context usage, and recent large tool outputs.

@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
 const questionSchema = Type.Object({
@@ -8,7 +8,7 @@ const questionSchema = Type.Object({
   allowFreeText: Type.Optional(Type.Boolean({ description: "Allow the user to enter a custom answer (default true)" })),
 });
 
-export function registerQuestionTool(pi: ExtensionAPI): void {
+export default function questionExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "question",
     label: "question",

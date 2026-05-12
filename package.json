@@ -1,10 +1,10 @@
 {
   "name": "pi-basic-tools",
   "version": "0.2.0",
-  "description": "Standalone core productivity tools for pi: multi-edit, question, files, fetch, answer, Sourcegraph, and built-in search activation. (todo split out into @tintinweb/pi-tasks.)",
+  "description": "Standalone core productivity tools for pi: apply_patch, repo_map, read_block, question, questionnaire, fetch, Sourcegraph, and built-in search activation. (todo split out into @tintinweb/pi-tasks.)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/lulucatdev/pi-basic-tools.git"
+    "url": "https://github.com/capyup/pi-basic-tools.git"
   },
   "license": "MIT",
   "type": "module",
@@ -14,21 +14,33 @@
     "editing",
     "search"
   ],
+  "scripts": {
+    "test": "bun test",
+    "test:build": "bun build extensions/apply-patch.ts extensions/fetch.ts extensions/enable-builtin-search.ts extensions/repo-map.ts extensions/read-block.ts extensions/question.ts extensions/questionnaire.ts extensions/sourcegraph.ts --target=node --external @earendil-works/pi-coding-agent --external @earendil-works/pi-ai --external @earendil-works/pi-tui --external @sinclair/typebox --outdir /tmp/pi-basic-tools-build",
+    "check": "npm run test:build && npm test"
+  },
   "pi": {
     "extensions": [
-      "./extensions/multi-edit.ts",
-      "./extensions/files.ts",
+      "./extensions/apply-patch.ts",
       "./extensions/fetch.ts",
       "./extensions/enable-builtin-search.ts",
-      "./extensions/basic-tools.ts",
-      "./extensions/answer.ts",
+      "./extensions/repo-map.ts",
+      "./extensions/read-block.ts",
+      "./extensions/question.ts",
+      "./extensions/questionnaire.ts",
       "./extensions/sourcegraph.ts"
     ]
   },
   "peerDependencies": {
-    "@mariozechner/pi-ai": "*",
-    "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-tui": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
     "@sinclair/typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.74.0",
+    "@earendil-works/pi-coding-agent": "^0.74.0",
+    "@earendil-works/pi-tui": "^0.74.0",
+    "@sinclair/typebox": "^0.34.49"
   }
 }

@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const DEFAULT_BUILTINS = new Set(["read", "bash", "edit", "write"]);
 const SEARCH_BUILTINS = ["grep", "find", "ls"] as const;

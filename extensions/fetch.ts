@@ -7,8 +7,8 @@
 
 import { access, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { extname, join, relative, resolve } from "node:path";
-import type { ExecResult, ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 const fetchSchema = Type.Object({
