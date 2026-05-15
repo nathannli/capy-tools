@@ -52,13 +52,18 @@ Reference: https://github.com/earendil-works/pi/blob/main/packages/coding-agent/
 | `repo_map` | `tests/repo-map-read-block.test.ts` | real `git init`, `git add`, manifest parsing, filesystem walking |
 | `read_block` | `tests/repo-map-read-block.test.ts` | real file reads, TypeScript brace blocks, Markdown sections, invalid inputs |
 | `symbol_outline` | `tests/repo-map-read-block.test.ts` | TypeScript symbols, default exports, Markdown heading sections, nested declarations, display caps, `read_block` composition |
-| `question` | `tests/ui-tools.test.ts` | extension UI dialog contract for select/input/cancel results |
-| `questionnaire` | `tests/ui-tools.test.ts` | real questionnaire component logic and `@earendil-works/pi-tui` keyboard handling |
+| `apply_patch` | `tests/apply-patch.test.ts` | real filesystem writes, add/update/delete/move hunks, absolute paths, lenient heredoc wrappers, fuzzy Unicode punctuation matching, non-recursive directory delete refusal, compact renderer |
+| `exec_command` / `write_stdin` | `tests/terminal-session.test.ts` | real child processes on macOS, persistent session ids, stdin writes, polling, asserted interruption/tombstones, abort-after-spawn SIGKILL escalation, shell startup/permission failures, concurrent sessions, retained-buffer trimming, truncation, compact renderer |
+| `ask_user` | `tests/ui-tools.test.ts` | free-form dialog input, cancellation, compact renderer |
+| `ask_question` | `tests/ui-tools.test.ts` | extension UI dialog contract for select/input/cancel results |
+| `ask_questionnaire` | `tests/ui-tools.test.ts` | real questionnaire component logic and `@earendil-works/pi-tui` keyboard handling |
 | `fetch` | `tests/network-tools.test.ts` | live HTTP fetch, project-local `.pi/fetch`, real MarkItDown conversion, metadata files |
 | `sourcegraph` | `tests/network-tools.test.ts` | live Sourcegraph GraphQL API |
-| `enable-builtin-search` | `tests/repo-map-read-block.test.ts` | extension event handling and active-tool state transitions |
+| `enable-builtin-search` | `tests/repo-map-read-block.test.ts` | extension event handling, active-tool state transitions, and grouped basic-tool renderer boundaries |
+| Real TUI capture | `npm run test:tui-capture` / `scripts/capture-pi-tui.py` | launches a real interactive `pi` in a PTY, records raw ANSI plus `plain.txt`, and checks the visible grouped `TOOLS` output |
+| Current-settings TUI capture | `npm run test:tui-capture:current` | launches Pi with the user's normal extension/settings path to catch stale package loading or extension interaction bugs |
 
-The tests use a small in-process extension host to register and execute pi tools. It is a test harness for the extension API surface, not a substitute for the production dependencies: filesystem, Git, network, MarkItDown, Sourcegraph, and `@earendil-works/*` packages are all used for real.
+The tests use a small in-process extension host to register and execute pi tools. It is a test harness for the extension API surface, not a substitute for the production dependencies: filesystem, Git, network, MarkItDown, Sourcegraph, a working `pi` CLI, model access for TUI capture, and `@earendil-works/*` packages are all used for real.
 
 ## Research Summary
 
@@ -71,5 +76,8 @@ For JavaScript/TypeScript projects, current runners such as Vitest document the 
 1. Add or update a focused test before changing an extension's behavior.
 2. Cover both the happy path and the failure path that should not mutate state or should surface a clear error.
 3. Use real temp directories and real CLI/network dependencies; do not add test skips for missing dependencies unless a future maintainer explicitly changes the strict policy.
-4. Run `npm test` while iterating, then `npm run check` before publishing or installing through pi.
-5. When a real bug is found, keep the failing test as a regression test and document any new runtime requirement in `README.md` or this file.
+4. Treat `apply_patch` tests as real write/delete/move tests. The tool intentionally allows absolute paths and uses extension-process filesystem permissions, so every test must operate inside temporary directories unless it is explicitly testing path rejection behavior.
+5. Run `npm test` while iterating, then `npm run check` before publishing or installing through pi.
+6. For renderer regressions that only appear in the real terminal, run `npm run test:tui-capture` and inspect `.pi/tui-captures/<timestamp>/plain.txt` plus `raw.ansi`.
+7. If the isolated capture passes but the live app still looks wrong, run `npm run test:tui-capture:current` to verify the user's normal Pi settings load this package's current `extensions/index.ts` entrypoint.
+8. When a real bug is found, keep the failing test as a regression test and document any new runtime requirement in `README.md` or this file.

@@ -8,15 +8,16 @@ const questionSchema = Type.Object({
   allowFreeText: Type.Optional(Type.Boolean({ description: "Allow the user to enter a custom answer (default true)" })),
 });
 
-export default function questionExtension(pi: ExtensionAPI): void {
+export default function askQuestionExtension(pi: ExtensionAPI): void {
   pi.registerTool({
-    name: "question",
-    label: "question",
+    name: "ask_question",
+    label: "ask_question",
     description: "Ask the user a focused question during execution. Supports suggested options and free-text answers.",
     promptSnippet: "Ask the user a focused question with optional choices",
     promptGuidelines: [
-      "Use question when a user decision is required before proceeding.",
+      "Use ask_question when a single user decision is required before proceeding.",
       "Prefer concise questions with a small set of meaningful options.",
+      "Use ask_user instead when the question should be free-form without structured options.",
     ],
     parameters: questionSchema,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

@@ -2,7 +2,7 @@
 
 Standalone basic tools for pi.
 
-This package bundles a practical set of editing, fetch, web-reference, and built-in search activation extensions split out from `pi-goodstuff`.
+This package bundles a practical set of editing, fetch, web-reference, compact basic-tool UI, and built-in search activation extensions split out from `pi-goodstuff`.
 
 ## Included extensions
 
@@ -11,8 +11,11 @@ This package bundles a practical set of editing, fetch, web-reference, and built
 - `repo-map` (`repo_map` tool)
 - `read-block` (`read_block` tool)
 - `symbol-outline` (`symbol_outline` tool)
-- `question`
-- `questionnaire`
+- `apply-patch` (`apply_patch` tool)
+- `terminal-session` (`exec_command` and `write_stdin` tools)
+- `ask-user` (`ask_user` tool)
+- `ask-question` (`ask_question` tool)
+- `ask-questionnaire` (`ask_questionnaire` tool)
 - `sourcegraph`
 
 ## Core helper tools
@@ -23,15 +26,23 @@ This package bundles a practical set of editing, fetch, web-reference, and built
 
 `symbol_outline` lists a file's readable functions, classes, types, declarations, or Markdown sections with `read_block` line anchors, so agents can discover the right block before reading it.
 
-`question` adds a small, session-friendly tool for asking the user a focused question with optional choices and free-text fallback.
+`apply_patch` applies Codex-style patch text with `*** Begin Patch` / `*** End Patch` envelopes and `*** Add File`, `*** Update File`, `*** Move to`, and `*** Delete File` operations. This implementation intentionally stays close to Codex behavior: it accepts absolute paths, can overwrite add/move destinations, can delete files, creates missing parent directories for writes, and applies hunks sequentially. It is a direct extension-process filesystem writer, not pi's built-in `bash` approval flow; review paths carefully before using it, especially absolute paths and delete/move hunks. Delete is non-recursive and refuses directories.
 
-`questionnaire` adds a multi-question TUI for batching related questions with suggested options, recommended defaults, free-text answers, and a submit review screen.
+`exec_command` starts a persistent terminal session for long-running or interactive commands and returns either an `exit_code` for finished commands or a `session_id` for commands that are still running.
+
+`write_stdin` writes to, polls, or interrupts a running `exec_command` session; pass an empty `chars` string to poll fresh output and `"\u0003"` to send SIGINT. The first version is non-PTY, process-local, macOS-validated, and uses byte-based output limits through `max_output_bytes`; it is a direct extension-process shell runner rather than the built-in `bash` approval flow. Ctrl-C cleanup is cooperative, with abort-after-spawn escalating from SIGTERM to SIGKILL on macOS/POSIX; Windows process-tree cleanup is not validated in this package.
+
+`ask_user` adds a simple free-form user prompt for cases where the agent needs an unstructured answer before continuing.
+
+`ask_question` adds a small, session-friendly tool for asking the user a focused question with optional choices and free-text fallback.
+
+`ask_questionnaire` adds a multi-question TUI for batching related questions with suggested options, recommended defaults, free-text answers, and a submit review screen.
 
 > Looking for task tracking? `todo` is no longer shipped here. Install [`@tintinweb/pi-tasks`](https://github.com/tintinweb/pi-tasks) for `TaskCreate`/`TaskList`/`TaskUpdate` and friends.
 
 ### Built-in search activation
 
-`enable-builtin-search` activates pi's internal `grep`, `find`, and `ls` tools. Legacy custom `glob`, `grep`, and `list` implementations were removed so they cannot shadow pi's built-ins.
+`enable-builtin-search` activates pi's internal `grep`, `find`, and `ls` tools. It also installs compact group-aware renderers for common basic tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, and this package's file/navigation tools), so consecutive basic-tool calls collapse into one `TOOLS` block and split again when a non-basic tool appears. Legacy custom `glob`, `grep`, and `list` implementations were removed so they cannot shadow pi's built-ins.
 
 ## Runtime requirements and dependencies
 
@@ -98,7 +109,19 @@ npm run test:build
 npm run check
 ```
 
-Test coverage includes `repo_map`, `read_block`, `question`, `questionnaire`, `fetch`, `sourcegraph`, `enable-builtin-search`, and package wiring. See [`docs/testing.md`](docs/testing.md) for the dependency checklist, public research summary, and recommended pi extension testing workflow.
+For real TUI renderer validation, run the PTY capture harness. It launches an actual interactive `pi` instance, captures the terminal ANSI stream, writes a plain-text transcript under `.pi/tui-captures/`, and asserts that the grouped `TOOLS` block contains `symbol_outline`, `read_block`, and `grep` without `grep grep` duplication:
+
+```bash
+npm run test:tui-capture
+```
+
+To validate the user's normal Pi loading path rather than the isolated local-extension setup, run:
+
+```bash
+npm run test:tui-capture:current
+```
+
+Test coverage includes `repo_map`, `read_block`, `symbol_outline`, `apply_patch`, `exec_command`, `write_stdin`, `ask_user`, `ask_question`, `ask_questionnaire`, `fetch`, `sourcegraph`, grouped basic-tool rendering, `enable-builtin-search`, TUI capture harness support, and package wiring. See [`docs/testing.md`](docs/testing.md) for the dependency checklist, public research summary, and recommended pi extension testing workflow.
 
 ## Update
 

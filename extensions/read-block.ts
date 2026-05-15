@@ -1,7 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { keyHint } from "@earendil-works/pi-coding-agent";
-import { Container, Text } from "@earendil-works/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { canGroupTool, renderGroupedToolCall, renderGroupedToolResult, summarizeToolCall } from "./basic-tool-grouping.ts";
 import { readFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { capRange, chooseBlock, clamp, detectMode, findAnchorLine, formatLines, splitLines } from "./block-utils.ts";
@@ -64,18 +65,24 @@ export default function readBlockExtension(pi: ExtensionAPI): void {
     name: "read_block",
     label: "read_block",
     description:
-      "Read the semantic block around a line or symbol: markdown section, brace block, or indentation block. Use this when read offset/limit would include too much or too little context.",
-    promptSnippet: "Read the enclosing code or markdown block around a line or symbol",
+      "Read one semantic block around a specific line or symbol: markdown section, brace block, CSS rule, or indentation block. This is for targeted inspection, not sequential file scanning.",
+    promptSnippet: "Read one enclosing code, CSS, or Markdown block around a specific line or symbol",
     promptGuidelines: [
-      "Use read_block after repo_map, grep, or find identifies a relevant symbol or line.",
-      "Use symbol_outline first when you need to discover a file's readable blocks, then pass the chosen anchor line to read_block.",
-      "Use read for exact ranges or full files; use read_block for enclosing functions/classes/sections.",
+      "Use read_block only after repo_map, grep, find, or symbol_outline identifies a specific relevant symbol or line.",
+      "Do not call read_block repeatedly on many nearby lines in the same file; that is inefficient sliding-window scanning.",
+      "If you need adjacent regions or broad context from one file, use read with offset/limit or read the whole file when reasonable.",
+      "Use symbol_outline first when you need to discover a file's readable blocks, CSS rules, or Markdown sections, then read only the chosen anchors.",
+      "Use read for exact ranges or full files; use read_block for one enclosing function/class/CSS rule/section.",
     ],
     parameters: readBlockSchema,
-    renderCall() {
-      return new Container();
+    renderShell: "self",
+    renderCall(args, theme, context) {
+      return renderGroupedToolCall("read_block", args, theme, context, summarizeToolCall("read_block", args));
     },
-    renderResult: renderReadBlockResult,
+    renderResult(result, options, theme, context) {
+      if (options.expanded || !canGroupTool(context)) return renderReadBlockResult(result, options, theme);
+      return renderGroupedToolResult("read_block", result, options, theme, context);
+    },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const filePath = resolve(ctx.cwd, params.path);
       const mode = detectMode(filePath, params.mode);

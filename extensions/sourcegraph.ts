@@ -8,6 +8,9 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { keyHint } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
+import { canGroupTool, renderGroupedToolCall, renderGroupedToolResult, summarizeToolCall } from "./basic-tool-grouping.ts";
 import { Type } from "@sinclair/typebox";
 
 const sourcegraphSchema = Type.Object({
@@ -62,6 +65,40 @@ interface SearchResults {
 	resultCount: number;
 	approximateResultCount: string;
 	results: FileMatch[];
+}
+
+interface SourcegraphDetails {
+	query: string;
+	matchCount: number;
+	resultCount: number;
+	limitHit: boolean;
+	displayedResults: number;
+}
+
+function safeKeyHint(keybinding: string, description: string): string {
+	try {
+		return keyHint(keybinding, description);
+	} catch {
+		return `(${description})`;
+	}
+}
+
+function fallbackText(result: any): string {
+	const content = result.content?.[0];
+	return content?.type === "text" ? content.text : "";
+}
+
+function renderSourcegraphResult(result: any, { expanded, isPartial }: { expanded?: boolean; isPartial?: boolean }, theme: any) {
+	if (isPartial) return new Text(theme.fg("warning", "Searching Sourcegraph..."), 0, 0);
+
+	const details = result.details as SourcegraphDetails | undefined;
+	const fullText = fallbackText(result);
+	if (!details) return new Text(fullText, 0, 0);
+	if (expanded) return new Text(fullText, 0, 0);
+
+	const limit = details.limitHit ? ", limit hit" : "";
+	const hint = safeKeyHint("app.tools.expand", "to expand");
+	return new Text(theme.fg("success", "sourcegraph ") + theme.fg("accent", `${details.matchCount} matches / ${details.resultCount} results`) + theme.fg("dim", `${limit} ${hint}`), 0, 0);
 }
 
 function formatResults(searchResults: SearchResults, contextWindow: number): string {
@@ -147,6 +184,14 @@ export default function (pi: ExtensionAPI) {
 			"No API key required. Useful for finding reference implementations, API usage examples, " +
 			"and patterns in open-source code.",
 		parameters: sourcegraphSchema,
+		renderShell: "self",
+		renderCall(args, theme, context) {
+			return renderGroupedToolCall("sourcegraph", args, theme, context, summarizeToolCall("sourcegraph", args));
+		},
+		renderResult(result, options, theme, context) {
+			if (options.expanded || !canGroupTool(context)) return renderSourcegraphResult(result, options, theme);
+			return renderGroupedToolResult("sourcegraph", result, options, theme, context);
+		},
 
 		async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
 			const query: string = params.query;
@@ -204,6 +249,13 @@ export default function (pi: ExtensionAPI) {
 
 				return {
 					content: [{ type: "text" as const, text: output }],
+					details: {
+						query,
+						matchCount: searchResults.matchCount,
+						resultCount: searchResults.resultCount,
+						limitHit: searchResults.limitHit,
+						displayedResults: searchResults.results.filter((r: FileMatch) => r.__typename === "FileMatch" && r.repository && r.file).slice(0, 10).length,
+					} satisfies SourcegraphDetails,
 				};
 			} finally {
 				clearTimeout(timeout);

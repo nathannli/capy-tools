@@ -8,8 +8,10 @@
 import { access, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { extname, join, relative, resolve } from "node:path";
 import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { keyHint } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { canGroupTool, renderGroupedToolCall, renderGroupedToolResult, summarizeToolCall } from "./basic-tool-grouping.ts";
 
 const fetchSchema = Type.Object({
 	url: Type.String({ description: "The URL to fetch content from (must start with http:// or https://)" }),
@@ -314,26 +316,24 @@ function buildResultText(details: FetchDetails): string {
 	return lines.join("\n");
 }
 
+function safeKeyHint(keybinding: string, description: string): string {
+	try {
+		return keyHint(keybinding, description);
+	} catch {
+		return `(${description})`;
+	}
+}
+
+function fallbackText(result: any): string {
+	const content = result.content?.[0];
+	return content?.type === "text" ? content.text : "";
+}
+
 function renderSummary(details: FetchDetails, theme: any): string {
-	const lines: string[] = [];
-	lines.push(theme.fg("success", "Fetched"));
-	if (details.contentType) lines[0] += theme.fg("dim", ` ${details.contentType}`);
-	lines.push(theme.fg("dim", `Size: ${formatBytes(details.responseBytes)}`));
-	lines.push(theme.fg("dim", `Dir: ${details.artifactDirDisplay}`));
-	lines.push(theme.fg("dim", `Raw: ${details.rawPathDisplay}`));
-	if (details.markdownPathDisplay) {
-		lines.push(theme.fg("dim", `Markdown: ${details.markdownPathDisplay}`));
-	} else {
-		lines.push(theme.fg("warning", "Markdown: conversion failed"));
-	}
-	lines.push(theme.fg("dim", `Context: read ${details.readTarget.pathDisplay}${formatReadTargetStats(details.readTarget)}`));
-	lines.push(theme.fg("dim", `Metadata: ${details.metadataPathDisplay}`));
-	if (details.markitdown.success) {
-		lines.push(theme.fg("dim", `MarkItDown: ${details.markitdown.command}`));
-	} else {
-		lines.push(theme.fg("warning", `MarkItDown: ${details.markitdown.error ?? "failed"}`));
-	}
-	return lines.join("\n");
+	const target = details.markdownPathDisplay ?? details.rawPathDisplay;
+	const status = details.markdownPathDisplay ? "markdown" : "raw";
+	const hint = safeKeyHint("app.tools.expand", "to expand");
+	return theme.fg("success", "fetch ") + theme.fg("accent", target) + theme.fg("dim", ` ${status}, ${formatBytes(details.responseBytes)} ${hint}`);
 }
 
 export default function (pi: ExtensionAPI) {
@@ -478,25 +478,23 @@ export default function (pi: ExtensionAPI) {
 			}
 		},
 
-		renderCall(args, theme, _context) {
-			let text = theme.fg("toolTitle", theme.bold("fetch "));
-			const previewUrl = args.url.length > 80 ? `${args.url.slice(0, 77)}...` : args.url;
-			text += theme.fg("accent", previewUrl);
-			return new Text(text, 0, 0);
+		renderShell: "self",
+		renderCall(args, theme, context) {
+			return renderGroupedToolCall("fetch", args, theme, context, summarizeToolCall("fetch", args));
 		},
 
-		renderResult(result, { isPartial }, theme, _context) {
+		renderResult(result, { expanded, isPartial }, theme, context) {
 			if (isPartial) {
 				return new Text(theme.fg("warning", "Fetching..."), 0, 0);
 			}
 
 			const details = result.details as FetchDetails | undefined;
-			if (!details) {
-				const content = result.content.find((item) => item.type === "text");
-				return new Text(content?.type === "text" ? content.text : theme.fg("error", "No output"), 0, 0);
-			}
+			const fullText = fallbackText(result);
+			if (!details) return new Text(fullText || theme.fg("error", "No output"), 0, 0);
+			if (expanded) return new Text(fullText, 0, 0);
+			if (!canGroupTool(context)) return new Text(renderSummary(details, theme), 0, 0);
 
-			return new Text(renderSummary(details, theme), 0, 0);
+			return renderGroupedToolResult("fetch", result, { expanded, isPartial }, theme, context);
 		},
 	});
 }

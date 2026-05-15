@@ -6,6 +6,17 @@ import fetchExtension from "../extensions/fetch.ts";
 import sourcegraphExtension from "../extensions/sourcegraph.ts";
 import { createExtensionHost, withTempDir } from "./extension-host.ts";
 
+function plainTheme() {
+  return {
+    fg: (_name: string, text: string) => text,
+    bold: (text: string) => text,
+  };
+}
+
+function renderComponent(component: { render: (width: number) => string[] }) {
+  return component.render(200).map((line) => line.trimEnd()).join("\n");
+}
+
 describe("fetch", () => {
   test(
     "fetches a live URL, stores artifacts, and converts with the real MarkItDown CLI",
@@ -33,6 +44,16 @@ describe("fetch", () => {
         const metadata = JSON.parse(await readFile(details.metadataPath, "utf8"));
         expect(metadata.converter.success).toBe(true);
         expect(metadata.recommendedRead.kind).toBe("markdown");
+
+        const tool = host.getTool("fetch");
+        expect(renderComponent(tool.renderCall({ url: "https://example.com/" }, plainTheme(), {}))).toBe("");
+        const collapsed = renderComponent(tool.renderResult(result, { expanded: false, isPartial: false }, plainTheme(), {}));
+        expect(collapsed).toContain("fetch .pi/fetch/");
+        expect(collapsed).toContain("markdown");
+        expect(collapsed).toContain("(to expand)");
+        expect(collapsed).not.toContain("Fetched URL:");
+        const expanded = renderComponent(tool.renderResult(result, { expanded: true, isPartial: false }, plainTheme(), {}));
+        expect(expanded).toContain("Fetched URL: https://example.com/");
       });
     },
     120_000,
@@ -66,6 +87,17 @@ describe("sourcegraph", () => {
       expect(text).toContain("# Sourcegraph Search Results");
       expect(text).toContain("github.com/openai/codex");
       expect(text).toContain("CODEX_CORE_APPLY_PATCH_ARG1");
+      expect(result.details.matchCount).toBeGreaterThan(0);
+
+      const tool = host.getTool("sourcegraph");
+      expect(renderComponent(tool.renderCall({ query: "CODEX_CORE_APPLY_PATCH_ARG1" }, plainTheme(), {}))).toBe("");
+      const collapsed = renderComponent(tool.renderResult(result, { expanded: false, isPartial: false }, plainTheme(), {}));
+      expect(collapsed).toContain("sourcegraph ");
+      expect(collapsed).toContain("matches");
+      expect(collapsed).toContain("(to expand)");
+      expect(collapsed).not.toContain("CODEX_CORE_APPLY_PATCH_ARG1");
+      const expanded = renderComponent(tool.renderResult(result, { expanded: true, isPartial: false }, plainTheme(), {}));
+      expect(expanded).toContain("CODEX_CORE_APPLY_PATCH_ARG1");
     },
     120_000,
   );

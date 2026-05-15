@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { keyHint } from "@earendil-works/pi-coding-agent";
-import { Container, Text } from "@earendil-works/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
+import { canGroupTool, renderGroupedToolCall, renderGroupedToolResult, summarizeToolCall } from "./basic-tool-grouping.ts";
 import { Type } from "@sinclair/typebox";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
@@ -310,10 +311,14 @@ export default function repoMapExtension(pi: ExtensionAPI): void {
       "Do not use repo_map for exact file contents; use read or read_block after repo_map identifies relevant files.",
     ],
     parameters: repoMapSchema,
-    renderCall() {
-      return new Container();
+    renderShell: "self",
+    renderCall(args, theme, context) {
+      return renderGroupedToolCall("repo_map", args, theme, context, summarizeToolCall("repo_map", args));
     },
-    renderResult: renderRepoMapResult,
+    renderResult(result, options, theme, context) {
+      if (options.expanded || !canGroupTool(context)) return renderRepoMapResult(result, options, theme);
+      return renderGroupedToolResult("repo_map", result, options, theme, context);
+    },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const requested = params.path ? resolve(ctx.cwd, params.path) : ctx.cwd;
       const rootCandidate = findProjectRoot(requested);

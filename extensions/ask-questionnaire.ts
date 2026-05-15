@@ -31,10 +31,10 @@ interface QuestionnaireResult {
 	cancelled: boolean;
 }
 
-export default function questionnaireExtension(pi: ExtensionAPI) {
+export default function askQuestionnaireExtension(pi: ExtensionAPI) {
 	pi.registerTool({
-		name: "questionnaire",
-		label: "questionnaire",
+		name: "ask_questionnaire",
+		label: "ask_questionnaire",
 		description:
 			"Ask the user one or more questions via a UI questionnaire. " +
 			"Each question can have suggested options, but always includes free-text input. " +
@@ -42,9 +42,9 @@ export default function questionnaireExtension(pi: ExtensionAPI) {
 			"Batch related questions into one call. Returns Q&A records.",
 		promptSnippet: "Ask the user one or more questions in a multi-question TUI questionnaire",
 		promptGuidelines: [
-			"Use questionnaire when multiple related user decisions are needed before proceeding.",
-			"Batch related questions into one questionnaire call instead of asking repeatedly.",
-			"Use question for a single focused question; use questionnaire for two or more questions.",
+			"Use ask_questionnaire when multiple related user decisions are needed before proceeding.",
+			"Batch related questions into one ask_questionnaire call instead of asking repeatedly.",
+			"Use ask_question for a single structured question; use ask_user for one free-form question without structured options.",
 		],
 		parameters: Type.Object({
 			questions: Type.Array(
@@ -399,7 +399,7 @@ export default function questionnaireExtension(pi: ExtensionAPI) {
 			const qs = (args.questions as Array<{ id: string; question: string }>) || [];
 			const count = qs.length;
 			const labels = qs.map((q) => q.id).join(", ");
-			let text = theme.fg("toolTitle", theme.bold("questionnaire "));
+			let text = theme.fg("toolTitle", theme.bold("ask_questionnaire "));
 			text += theme.fg("muted", `${count} question${count !== 1 ? "s" : ""}`);
 			if (labels) text += theme.fg("dim", ` (${truncateToWidth(labels, 40)})`);
 			return new Text(text, 0, 0);

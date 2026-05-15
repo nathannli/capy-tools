@@ -1,10 +1,13 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { keyHint } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { canGroupTool, renderGroupedToolCall, renderGroupedToolResult, summarizeToolCall } from "./basic-tool-grouping.ts";
 import { readFile } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import { chooseBlock, clamp, declarationName, detectMode, indentOf, splitLines, type Mode } from "./block-utils.ts";
 
-type SymbolKind = "function" | "class" | "interface" | "type" | "enum" | "const" | "let" | "var" | "def" | "struct" | "trait" | "impl" | "heading" | "symbol";
+type SymbolKind = "function" | "class" | "interface" | "type" | "enum" | "const" | "let" | "var" | "def" | "struct" | "trait" | "impl" | "heading" | "css-rule" | "symbol";
 
 type OutlineBlock = {
   index: number;
@@ -33,6 +36,11 @@ function isMarkdownPath(filePath: string): boolean {
   return ext === ".md" || ext === ".mdx";
 }
 
+function isCssPath(filePath: string): boolean {
+  const ext = extname(filePath).toLowerCase();
+  return ext === ".css" || ext === ".scss" || ext === ".sass" || ext === ".less";
+}
+
 function truncate(value: string, maxLength: number): string {
   if (value.length <= maxLength) return value;
   return `${value.slice(0, Math.max(0, maxLength - 3))}...`;
@@ -46,6 +54,15 @@ function headingInfo(line: string): { name: string; level: number } | undefined 
   const match = line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/);
   if (!match) return undefined;
   return { level: match[1].length, name: match[2].trim() };
+}
+
+function cssRuleName(line: string): string | undefined {
+  const trimmed = line.trim();
+  if (!trimmed.endsWith("{") || trimmed.startsWith("/*") || trimmed.startsWith("*")) return undefined;
+  if (/^[\w-]+\s*:/.test(trimmed)) return undefined;
+  const selector = trimmed.slice(0, -1).trim();
+  if (!selector) return undefined;
+  return selector.replace(/\s+/g, " ");
 }
 
 function declarationKind(line: string): SymbolKind | undefined {
@@ -76,6 +93,7 @@ function shouldIncludeDeclaration(line: string, includeNested: boolean): boolean
 
 function buildOutlineBlocks(filePath: string, displayPath: string, lines: string[], mode: Mode, includeNested: boolean, maxSignatureLength: number): OutlineBlock[] {
   const markdown = mode === "markdown" || (mode === "auto" && isMarkdownPath(filePath));
+  const css = mode === "auto" && isCssPath(filePath);
   const blocks: OutlineBlock[] = [];
 
   for (let i = 0; i < lines.length; i++) {
@@ -89,6 +107,10 @@ function buildOutlineBlocks(filePath: string, displayPath: string, lines: string
       kind = "heading";
       name = heading.name;
       headingLevel = heading.level;
+    } else if (css) {
+      name = cssRuleName(lines[i]);
+      if (!name || !shouldIncludeDeclaration(lines[i], includeNested)) continue;
+      kind = "css-rule";
     } else {
       name = declarationName(lines[i]);
       if (!name || !shouldIncludeDeclaration(lines[i], includeNested)) continue;
@@ -114,6 +136,32 @@ function buildOutlineBlocks(filePath: string, displayPath: string, lines: string
   return blocks;
 }
 
+function safeKeyHint(keybinding: string, description: string): string {
+  try {
+    return keyHint(keybinding, description);
+  } catch {
+    return `(${description})`;
+  }
+}
+
+function fallbackText(result: any): string {
+  const content = result.content?.[0];
+  return content?.type === "text" ? content.text : "";
+}
+
+function renderSymbolOutlineResult(result: any, { expanded, isPartial }: { expanded?: boolean; isPartial?: boolean }, theme: any) {
+  if (isPartial) return new Text(theme.fg("warning", "Outlining symbols..."), 0, 0);
+
+  const details = result.details as { displayPath?: string; blockCount?: number; displayedBlockCount?: number; truncated?: boolean } | undefined;
+  const fullText = fallbackText(result);
+  if (!details) return new Text(fullText, 0, 0);
+  if (expanded) return new Text(fullText, 0, 0);
+
+  const shown = details.truncated ? `, showing ${details.displayedBlockCount}` : "";
+  const hint = safeKeyHint("app.tools.expand", "to expand");
+  return new Text(theme.fg("success", "symbol outline ") + theme.fg("accent", `${details.displayPath}: ${details.blockCount} blocks${shown}`) + theme.fg("muted", ` ${hint}`), 0, 0);
+}
+
 function formatBlock(block: OutlineBlock): string {
   const kind = block.kind === "heading" && block.headingLevel ? `heading h${block.headingLevel}` : block.kind;
   return [
@@ -128,14 +176,23 @@ export default function symbolOutlineExtension(pi: ExtensionAPI): void {
     name: "symbol_outline",
     label: "symbol_outline",
     description:
-      "List the readable symbols or Markdown sections in a file with line anchors that can be passed directly to read_block.",
+      "List readable symbols, CSS rules, or Markdown sections in a file with line anchors that can be passed directly to read_block.",
     promptSnippet: "Outline a file into readable blocks before choosing a read_block line anchor",
     promptGuidelines: [
-      "Use symbol_outline before read_block when you need to discover a file's functions, classes, types, or Markdown sections.",
+      "Use symbol_outline before read_block when you need to discover a file's functions, classes, types, CSS rules, or Markdown sections.",
       "Use the returned read_block line anchor to read exactly the block you choose.",
+      "Do not follow symbol_outline by reading every block; choose the few relevant anchors, or use read for broad contiguous context.",
       "Prefer includeNested=false for navigation; enable includeNested only when methods or nested declarations matter.",
     ],
     parameters: symbolOutlineSchema,
+    renderShell: "self",
+    renderCall(args, theme, context) {
+      return renderGroupedToolCall("symbol_outline", args, theme, context, summarizeToolCall("symbol_outline", args));
+    },
+    renderResult(result, options, theme, context) {
+      if (options.expanded || !canGroupTool(context)) return renderSymbolOutlineResult(result, options, theme);
+      return renderGroupedToolResult("symbol_outline", result, options, theme, context);
+    },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const filePath = resolve(ctx.cwd, params.path);
       const mode = detectMode(filePath, params.mode);
