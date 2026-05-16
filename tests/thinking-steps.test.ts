@@ -56,6 +56,30 @@ describe("thinking-steps parse + render", () => {
     expect(steps[0]?.summary.length).toBeGreaterThan(0);
   });
 
+  test("splits single-newline action lines into separate steps", () => {
+    const text = [
+      "Inspect the server configuration.",
+      "Check the Redis connection.",
+      "Verify the API endpoint.",
+    ].join("\n");
+    const steps = deriveThinkingSteps([{ contentIndex: 0, text }]);
+    expect(steps.length).toBeGreaterThanOrEqual(3);
+    expect(steps[0]?.summary.toLowerCase()).toContain("inspect");
+    expect(steps[1]?.summary.toLowerCase()).toContain("check");
+    expect(steps[2]?.summary.toLowerCase()).toContain("verify");
+  });
+
+  test("does not over-split a single cohesive paragraph", () => {
+    // A single paragraph with multiple sentences but no clear action cues
+    // on every line should stay as one step.
+    const text =
+      "I need to understand the current state before making changes. " +
+      "The renderer seems to have a bug in the refresh path. " +
+      "Let me trace through the code carefully.";
+    const steps = deriveThinkingSteps([{ contentIndex: 0, text }]);
+    expect(steps.length).toBe(1);
+  });
+
   test("is a passive renderer with no user-facing controls", async () => {
     const indexSource = await readFile(join(repoRoot, "extensions/thinking-steps/index.ts"), "utf8");
 
@@ -71,7 +95,7 @@ describe("thinking-steps parse + render", () => {
     expect(indexSource).not.toContain("setHiddenThinkingLabel");
   });
 
-  test("summary mode renders a Codex-style header + bullet rows", () => {
+  test("summary mode renders a tree-shaped header + connector rows", () => {
     const steps = deriveThinkingSteps(sampleBlocks);
     const lines = renderThinkingStepsLines(widthSafeTheme, 200, {
       mode: "summary",
@@ -81,26 +105,22 @@ describe("thinking-steps parse + render", () => {
     expect(lines.length).toBeGreaterThan(1);
 
     const header = lines[0] ?? "";
-    expect(header).toContain("Thinking");
-    expect(header).toMatch(/\d+ steps?/);
+    expect(header).toContain("Thinking Steps");
+    // The `┆` left-margin decoration is gone after the visual redesign.
+    expect(header).not.toContain("┆");
 
-    // Each step's first line leads with the `• ` bullet marker used by the
-    // pi-basic-tools compact tool grouping renderer.  Continuation lines may
-    // start with the alignment indent we use to wrap long summaries.
-    const stepRows = lines.slice(1).filter((line) => line.startsWith("\u2022 "));
+    // Step rows use single-char tree connectors ├ / └.
+    const stepRows = lines.slice(1).filter((line) => line.includes("├ ") || line.includes("└ "));
     expect(stepRows.length).toBe(Math.min(steps.length, 5));
 
-    for (const line of lines) {
-      // Tree-branch connectors from the upstream renderer must not appear.
-      expect(line).not.toContain("├─");
-      expect(line).not.toContain("└─");
-      // The banner row from the upstream renderer is gone.
-      expect(line).not.toContain("Thinking Steps · Summary");
-      expect(line).not.toContain("Thinking Steps · Expanded");
-    }
+    // Role icons are colored by their semantic role.
+    const hasColoredIcon = lines.some((line) =>
+      line.includes("◫") || line.includes("⌕") || line.includes("↔") || line.includes("✓") || line.includes("✎") || line.includes("◇") || line.includes("!")
+    );
+    expect(hasColoredIcon).toBe(true);
   });
 
-  test("collapsed mode renders a single Thinking · summary line with a pulse glyph when active", () => {
+  test("collapsed mode renders a tree-connector summary line with a pulse glyph when active", () => {
     const steps = deriveThinkingSteps([
       { contentIndex: 0, text: "Inspect renderer." },
     ]);
@@ -113,13 +133,14 @@ describe("thinking-steps parse + render", () => {
     });
     expect(lines.length).toBeGreaterThanOrEqual(1);
     const text = lines[0] ?? "";
-    expect(text.startsWith("Thinking \u00b7")).toBe(true);
+    // Collapsed line starts with the upstream-style tree connector.
+    expect(text.startsWith("│ Thinking ")).toBe(true);
     // The trailing pulse glyph belongs to the current animation frame, which
-    // is one of `·`, `•`, `●`.
-    expect(/[\u00b7\u2022\u25cf]\s*$/u.test(text)).toBe(true);
+    // is one of `·`, `•`.
+    expect(/[·•]\s*$/u.test(text)).toBe(true);
   });
 
-  test("expanded mode emits | continuation connectors and a final \u2514 corner", () => {
+  test("expanded mode emits tree connectors and body with markdown structure", () => {
     const steps = deriveThinkingSteps([
       { contentIndex: 0, text: "Inspect renderer implementation.\nWe need to read the file." },
       { contentIndex: 1, text: "Compare visibility toggling.\nLook at the old and new path." },
@@ -129,12 +150,14 @@ describe("thinking-steps parse + render", () => {
       steps,
       isActive: false,
     });
-    expect(lines.some((line) => line.startsWith("  \u2502 "))).toBe(true);
-    // The last body line uses the └ corner so the block visually closes.
-    expect(lines.some((line) => line.startsWith("  \u2514 "))).toBe(true);
+    // Step headers use single-char tree connectors.
+    expect(lines.some((line) => line.includes("├ "))).toBe(true);
+    expect(lines.some((line) => line.includes("└ "))).toBe(true);
+    // Body lines use the tree continuation connector (│  ) for non-last steps.
+    expect(lines.some((line) => line.includes("│  "))).toBe(true);
   });
 
-  test("active thinking step uses warning marker + muted text + bold (no accent)", () => {
+  test("active thinking step uses accent color + bold", () => {
     const blocks = makeBlocks("Investigating the renderer right now to find the bug.");
     const steps = deriveThinkingSteps(blocks);
     const activeId = steps[0]!.id;
@@ -144,13 +167,15 @@ describe("thinking-steps parse + render", () => {
       activeStepId: activeId,
       isActive: true,
     });
-    const stepRow = lines.find((line) => line.includes("<warning>•</warning>")) ?? "";
-    expect(stepRow).toMatch(/<warning>•<\/warning>/);
-    expect(stepRow).toMatch(/<b><muted>[^<]*<\/muted><\/b>/);
-    expect(stepRow).not.toMatch(/<accent>[^<]+<\/accent>/);
+    // The active step header uses the accent-colored connector.
+    // With only one step the connector is └ (last); with multiple it would be ├ .
+    const activeRow = lines.find((line) => line.includes("<accent>└ </accent>")) ?? "";
+    expect(activeRow).toMatch(/<accent>└ <\/accent>/);
+    // Summary text is also accent-colored and bold.
+    expect(activeRow).toMatch(/<b><accent>[^<]*<\/accent><\/b>/);
   });
 
-  test("done Thinking summary header uses muted color (not accent)", () => {
+  test("done Thinking summary header uses dim color", () => {
     const steps = deriveThinkingSteps(sampleBlocks);
     const lines = renderThinkingStepsLines(taggingTheme, 200, {
       mode: "summary",
@@ -158,11 +183,13 @@ describe("thinking-steps parse + render", () => {
       activeStepId: undefined,
       isActive: false,
     });
-    expect(lines[0]).toContain("<muted>Thinking</muted>");
-    expect(lines[0]).not.toContain("<accent>Thinking</accent>");
+    expect(lines[0]).not.toContain("┆");
+    expect(lines[0]).toContain("Thinking Steps");
+    expect(lines[0]).toContain("3 thoughts");
   });
 
-  test("active Thinking summary header stays warning", () => {
+  test("active signal lives on step connectors, not the group header", () => {
+    // Upstream puts the active signal on step connectors, not on the group header.
     const steps = deriveThinkingSteps(sampleBlocks);
     const lines = renderThinkingStepsLines(taggingTheme, 200, {
       mode: "summary",
@@ -170,10 +197,12 @@ describe("thinking-steps parse + render", () => {
       activeStepId: steps[0]!.id,
       isActive: true,
     });
-    expect(lines[0]).toContain("<warning>Thinking</warning>");
+    expect(lines[0]).toContain("Thinking Steps");
+    const activeRow = lines.find((line) => line.includes("<accent>├ </accent>"));
+    expect(activeRow).toBeDefined();
   });
 
-  test("done collapsed Thinking label uses muted (not accent)", () => {
+  test("done collapsed Thinking label uses dim", () => {
     const steps = deriveThinkingSteps(sampleBlocks);
     const lines = renderThinkingStepsLines(taggingTheme, 200, {
       mode: "collapsed",
@@ -182,11 +211,12 @@ describe("thinking-steps parse + render", () => {
       isActive: false,
       nowMs: 0,
     });
-    expect(lines[0]).toContain("<muted>Thinking</muted>");
+    expect(lines[0]).toContain("<muted>│</muted>");
+    expect(lines[0]).toContain("<dim>Thinking</dim>");
     expect(lines[0]).not.toContain("<accent>Thinking</accent>");
   });
 
-  test("role glyphs render in muted color regardless of role", () => {
+  test("role glyphs render in role color", () => {
     const blocks = makeBlocks(
       "I need to compare the new and old renderers carefully.",
       "Let me inspect the existing implementation to understand it.",
@@ -199,15 +229,15 @@ describe("thinking-steps parse + render", () => {
       activeStepId: undefined,
       isActive: false,
     });
-    const stepRows = lines.filter((line) => line.includes("<muted>•</muted>"));
+    const stepRows = lines.filter((line) => line.includes("├ ") || line.includes("└ "));
     expect(stepRows.length).toBeGreaterThanOrEqual(3);
-    const NON_MUTED_GLYPH = /<(warning|accent|success|error|mdLink)>[◫⌕↔✓✎◇!·]<\/(warning|accent|success|error|mdLink)>/;
-    for (const row of stepRows) {
-      expect(row).not.toMatch(NON_MUTED_GLYPH);
-    }
+    // Verify that role icons are colored by their semantic role.
+    expect(lines.some((line) => line.includes("<warning>↔</warning>"))).toBe(true);  // compare
+    expect(lines.some((line) => line.includes("<mdLink>◫</mdLink>"))).toBe(true);   // inspect
+    expect(lines.some((line) => line.includes("<success>✓</success>"))).toBe(true); // verify
   });
 
-  test("uses warning color for the marker of the active step", () => {
+  test("uses accent color for the connector of the active step", () => {
     const steps = deriveThinkingSteps(sampleBlocks);
     const lines = renderThinkingStepsLines(taggingTheme, 200, {
       mode: "summary",
@@ -215,8 +245,7 @@ describe("thinking-steps parse + render", () => {
       isActive: true,
       activeStepId: steps[0]?.id,
     });
-    // The first row tagged with the warning marker is the active step.
-    const activeRow = lines.find((line) => line.includes("<warning>\u2022</warning>"));
+    const activeRow = lines.find((line) => line.includes("<accent>├ </accent>"));
     expect(activeRow).toBeDefined();
   });
 
@@ -235,7 +264,7 @@ describe("thinking-steps parse + render", () => {
     component.invalidate();
     const collapsedLines = component.render(200);
     expect(collapsedLines.length).toBeGreaterThanOrEqual(1);
-    expect(collapsedLines[0] ?? "").toMatch(/^Thinking \u00b7/);
+    expect(collapsedLines[0] ?? "").toMatch(/^│ Thinking /);
 
     clearActiveThinkingState(undefined, scopeKey);
   });

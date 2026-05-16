@@ -2,16 +2,8 @@ import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { deriveThinkingSteps } from "./parse.ts";
 import { getActiveThinkingState, getCurrentThinkingScopeKey, getThinkingStepsMode } from "./state.ts";
+import { ROLE_GLYPHS, ROLE_COLORS, treeConnector, type VisualRole } from "../shared/visual.ts";
 import type { DerivedThinkingStep, ThinkingSemanticRole, ThinkingSourceBlock, ThinkingThemeLike } from "./types.ts";
-
-// pi-basic-tools visual language:
-//   - group header:  "<verb> <count> <noun>"  in accent/status color
-//   - item line:     "• headline"             marker color reflects status
-//   - continuation:  "  │ <wrapped body>"     muted connector, dim body
-//   - terminator:    "  └ <last body line>"   muted corner connector
-//
-// pi-thinking-steps' job here is to render the same shape so the thinking
-// block reads like any other Codex-style action block in the UI.
 
 interface RenderOptions {
   mode: "collapsed" | "summary" | "expanded";
@@ -23,39 +15,46 @@ interface RenderOptions {
 
 const MAX_SUMMARY_STEPS = 5;
 
-// Map a parsed semantic step role to a glyph + theme color that matches
-// pi-basic-tools' `roleIcon` palette.  Verify/success goes green, errors red,
-// inspect/search use the mdLink hue used elsewhere for "lookup" actions.
-function roleGlyph(role: ThinkingSemanticRole): string {
+// ---------- role glyphs & colors (upstream palette) ------------------------
+
+function thinkingRoleAsVisual(role: ThinkingSemanticRole): VisualRole {
   switch (role) {
-    case "inspect": return "◫";
-    case "search":  return "⌕";
-    case "compare": return "↔";
-    case "verify":  return "✓";
-    case "write":   return "✎";
-    case "plan":    return "◇";
-    case "error":   return "!";
-    default:        return "·";
+    case "inspect":
+    case "search":
+    case "compare":
+    case "write":
+    case "plan":
+    case "verify":
+      return role;
+    case "error":
+      return "default";
+    default:
+      return "default";
   }
 }
 
-function roleColor(_role: ThinkingSemanticRole): string {
-  // The glyph shape (set by roleGlyph) carries the semantic meaning; color
-  // belongs to the unified tier system, which keeps detail content muted
-  // regardless of role.
-  return "muted";
+function roleGlyph(role: ThinkingSemanticRole): string {
+  if (role === "error") return "!";
+  return ROLE_GLYPHS[thinkingRoleAsVisual(role)] ?? ROLE_GLYPHS.default;
+}
+
+function roleColor(role: ThinkingSemanticRole): string {
+  if (role === "error") return "error";
+  return ROLE_COLORS[thinkingRoleAsVisual(role)] ?? ROLE_COLORS.default;
 }
 
 function pulseGlyph(theme: ThinkingThemeLike, nowMs: number): string {
-  const frames = ["·", "•", "●", "•"];
-  const frame = Math.floor(nowMs / 220) % frames.length;
-  return theme.fg("warning", frames[frame] ?? "·");
+  const frames = [
+    theme.fg("dim", "·"),
+    theme.fg("muted", "•"),
+    theme.fg("accent", "•"),
+    theme.fg("muted", "•"),
+  ];
+  const frame = Math.floor(nowMs / 180) % frames.length;
+  return frames[frame] ?? frames[0]!;
 }
 
-// ---------- inline markdown rendering (kept from upstream) -----------------
-// Thinking traces frequently contain `**bold**`, `_em_`, `` `code` `` markers.
-// We sanitize control sequences and render the markers with theme colors so
-// the output stays readable in a real terminal.
+// ---------- inline markdown rendering --------------------------------------
 
 type InlineSegmentStyle = "plain" | "bold" | "code";
 interface InlineSegment { text: string; style: InlineSegmentStyle }
@@ -63,10 +62,10 @@ interface InlineSegment { text: string; style: InlineSegmentStyle }
 function sanitizeThinkingText(text: string): string {
   return text
     .replace(/\r\n?/g, "\n")
-    .replace(/\u001b[\]PX^_][\s\S]*?(?:\u0007|\u001b\\|\u009c)/g, "")
-    .replace(/[\u0090\u0098\u009d\u009e\u009f][\s\S]*?(?:\u0007|\u001b\\|\u009c)/g, "")
-    .replace(/\u001b(?:\[[0-?]*[ -/]*[@-~]|[ -/]*[0-9@-~])/g, "")
-    .replace(/\u009b[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/[\]PX^_][\s\S]*?(?:|\\|)/g, "")
+    .replace(/[][\s\S]*?(?:|\\|)/g, "")
+    .replace(/(?:\[[0-?]*[ -/]*[@-~]|[ -/]*[0-9@-~])/g, "")
+    .replace(/[0-?]*[ -/]*[@-~]/g, "")
     .replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, "");
 }
 
@@ -89,7 +88,7 @@ function parseInlineSegments(text: string): InlineSegment[] {
   return segments;
 }
 
-function renderSegment(theme: ThinkingThemeLike, segment: InlineSegment, textColor: string): string {
+function renderInlineSegment(theme: ThinkingThemeLike, segment: InlineSegment, textColor: string): string {
   if (segment.style === "bold") return theme.bold(theme.fg(textColor, segment.text));
   if (segment.style === "code") return theme.bold(theme.fg("mdCode", segment.text));
   return theme.fg(textColor, segment.text);
@@ -99,34 +98,70 @@ function renderInline(theme: ThinkingThemeLike, text: string, textColor: string)
   const sanitized = sanitizeThinkingText(text);
   const segments = parseInlineSegments(sanitized);
   if (segments.length === 0) return theme.fg(textColor, sanitized);
-  return segments.map((segment) => renderSegment(theme, segment, textColor)).join("");
+  return segments.map((segment) => renderInlineSegment(theme, segment, textColor)).join("");
 }
 
-// ---------- shared layout helpers ----------------------------------------
+function renderThinkingInlineMarkup(theme: ThinkingThemeLike, text: string): string {
+  return renderInline(theme, text, "thinkingText");
+}
+
+function renderThinkingDisplayLine(theme: ThinkingThemeLike, text: string): string {
+  const headingMatch = text.match(/^(\s{0,3})#{1,6}\s+(.+)$/);
+  if (headingMatch) {
+    const indent = headingMatch[1] ?? "";
+    const content = headingMatch[2] ?? "";
+    return `${indent}${theme.bold(theme.fg("accent", renderThinkingInlineMarkup(theme, content)))}`;
+  }
+
+  const listMatch = text.match(/^(\s*)([-*+]|\d+[.)]|[a-z][.)])\s+(.+)$/i);
+  if (listMatch) {
+    const indent = listMatch[1] ?? "";
+    const marker = listMatch[2] ?? "";
+    const content = listMatch[3] ?? "";
+    const renderedMarker = /^[-*+]$/ .test(marker) ? "•" : marker;
+    return `${indent}${theme.fg("muted", renderedMarker)} ${renderThinkingInlineMarkup(theme, content)}`;
+  }
+
+  return renderThinkingInlineMarkup(theme, text);
+}
+
+function renderWrappedRawText(theme: ThinkingThemeLike, text: string, width: number, prefix: string): string[] {
+  const innerWidth = Math.max(8, width - visibleWidth(prefix));
+  const sanitizedText = sanitizeThinkingText(text);
+  const rawLines = sanitizedText.replace(/\t/g, "    ").split("\n");
+  const rendered: string[] = [];
+  for (const rawLine of rawLines) {
+    if (rawLine.trim().length === 0) {
+      rendered.push(truncateToWidth(prefix, width, ""));
+      continue;
+    }
+    const styled = renderThinkingDisplayLine(theme, rawLine);
+    const wrapped = wrapTextWithAnsi(styled, innerWidth);
+    for (const line of wrapped) {
+      rendered.push(truncateToWidth(`${prefix}${line}`, width, ""));
+    }
+  }
+  return rendered;
+}
+
+// ---------- layout helpers -------------------------------------------------
 
 interface StepStyle {
-  markerColor: string;
   summaryColor: string;
   bold: boolean;
 }
 
 function stepStyle(step: DerivedThinkingStep, active: boolean): StepStyle {
   if (active) {
-    // Tier 1 signal (warning) lives on the marker; summary text stays Tier 3 (muted).
-    // Bold is kept as a weight cue that the line is still being written.
-    return { markerColor: "warning", summaryColor: "muted", bold: true };
+    return { summaryColor: "accent", bold: true };
   }
   if (step.hasExplicitFailure) {
-    return { markerColor: "error", summaryColor: "error", bold: false };
+    return { summaryColor: "error", bold: false };
   }
   if (step.role === "verify" && step.hasExplicitSuccess) {
-    return { markerColor: "success", summaryColor: "muted", bold: false };
+    return { summaryColor: "success", bold: false };
   }
-  return { markerColor: "muted", summaryColor: "muted", bold: false };
-}
-
-function applyBold(theme: ThinkingThemeLike, text: string, bold: boolean): string {
-  return bold ? theme.bold(text) : text;
+  return { summaryColor: roleColor(step.role), bold: false };
 }
 
 function wrapStepHeader(
@@ -134,76 +169,130 @@ function wrapStepHeader(
   width: number,
   step: DerivedThinkingStep,
   active: boolean,
+  isLast: boolean,
 ): string[] {
   const style = stepStyle(step, active);
-  const marker = theme.fg(style.markerColor, "•");
-  const glyph = theme.fg(roleColor(step.role), roleGlyph(step.role));
-  const prefix = `${marker} ${glyph} `;
-  const continuationPrefix = "    "; // align under the first letter of the summary
-  const summary = applyBold(theme, renderInline(theme, step.summary, style.summaryColor), style.bold);
+  const connectorColor = active ? "accent" : "muted";
+  const treePrefix = treeConnector(isLast);
+  const icon = theme.fg(roleColor(step.role), roleGlyph(step.role));
+  const prefix = `${theme.fg(connectorColor, treePrefix)}${icon} `;
+  const continuationPrefix = " ".repeat(visibleWidth(`${treePrefix}${roleGlyph(step.role)} `));
+  const summaryText = renderInline(theme, step.summary, style.summaryColor);
+  const finalSummary = style.bold ? theme.bold(summaryText) : summaryText;
   const innerWidth = Math.max(8, width - visibleWidth(prefix));
-  const wrapped = wrapTextWithAnsi(summary, innerWidth);
-  if (wrapped.length === 0) return [truncateToWidth(prefix, width, "")];
-  return wrapped.map((line, index) =>
+  const wrappedSummary = wrapTextWithAnsi(finalSummary, innerWidth);
+  if (wrappedSummary.length === 0) {
+    return [truncateToWidth(prefix, width, "")];
+  }
+  return wrappedSummary.map((line, index) =>
     truncateToWidth(`${index === 0 ? prefix : continuationPrefix}${line}`, width, ""),
   );
 }
 
-// Render the body text of a step beneath its header.  `isLast` controls whether
-// the continuation connector is `  │ ` (more items follow) or `  └ ` (last).
-function renderStepBody(
-  theme: ThinkingThemeLike,
-  width: number,
-  body: string,
-  isLast: boolean,
-): string[] {
-  const normalized = body.trim();
-  if (!normalized) return [];
+// ---------- collapsed mode -------------------------------------------------
 
-  const sanitized = sanitizeThinkingText(normalized).replace(/\t/g, "    ");
-  const rawLines = sanitized.split("\n");
-  if (rawLines.length === 0) return [];
+function stripInlineFormattingMarkers(text: string): string {
+  return text
+    .replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "$2")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/(?<![\w/.-])\*(?!\*)(?=\S)([\s\S]*?\S)(?<!\*)\*(?![\w/.-])/g, "$1")
+    .replace(/(?<![\w/.-])_(?!_)(?=\S)([\s\S]*?\S)(?<!_)_(?![\w/.-])/g, "$1");
+}
 
-  const continuationPrefix = `  ${theme.fg("muted", "│")} `;
-  const corner = `  ${theme.fg("muted", "└")} `;
-  const indent = `    `;
-  const innerWidth = Math.max(8, width - visibleWidth(continuationPrefix));
+function wrapCollapsedSummaryText(theme: ThinkingThemeLike, text: string, firstWidth: number, continuationWidth: number): string[] {
+  const words = parseInlineSegments(text).flatMap((segment) =>
+    segment.text
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((word) => {
+        if (segment.style === "bold") return theme.bold(theme.fg("thinkingText", word));
+        if (segment.style === "code") return theme.bold(theme.fg("mdCode", word));
+        return theme.fg("thinkingText", word);
+      }),
+  );
+  if (words.length === 0) return [];
 
   const lines: string[] = [];
-  for (let rawIndex = 0; rawIndex < rawLines.length; rawIndex += 1) {
-    const rawLine = rawLines[rawIndex] ?? "";
-    if (rawLine.trim().length === 0) {
-      lines.push(truncateToWidth(continuationPrefix, width, ""));
-      continue;
-    }
-    const styled = renderInline(theme, rawLine, "thinkingText");
-    const wrapped = wrapTextWithAnsi(styled, innerWidth);
-    for (const piece of wrapped) {
-      lines.push(truncateToWidth(`${continuationPrefix}${piece}`, width, ""));
+  let current = "";
+  let currentWidth = Math.max(8, firstWidth);
+  const continuationLineWidth = () => Math.max(8, continuationWidth);
+
+  for (const word of words) {
+    let pending = word;
+    while (pending.length > 0) {
+      const candidate = current ? `${current} ${pending}` : pending;
+      if (visibleWidth(candidate) <= currentWidth) {
+        current = candidate;
+        pending = "";
+        continue;
+      }
+
+      if (current) {
+        lines.push(current);
+        current = "";
+        currentWidth = continuationLineWidth();
+        continue;
+      }
+
+      const wrappedWord = wrapTextWithAnsi(pending, currentWidth);
+      if (wrappedWord.length === 0) {
+        pending = "";
+        continue;
+      }
+
+      if (wrappedWord.length === 1) {
+        current = wrappedWord[0] ?? "";
+        pending = "";
+        continue;
+      }
+
+      lines.push(...wrappedWord.slice(0, -1));
+      pending = wrappedWord[wrappedWord.length - 1] ?? "";
+      currentWidth = continuationLineWidth();
     }
   }
 
-  if (isLast && lines.length > 0) {
-    // Replace the final continuation `│` with the corner `└` so the block
-    // closes cleanly, matching the pi-basic-tools `formatCompactItem` shape.
-    const lastBody = rawLines[rawLines.length - 1] ?? "";
-    const lastStyled = renderInline(theme, lastBody.trim(), "thinkingText");
-    const lastWrapped = wrapTextWithAnsi(lastStyled, innerWidth);
-    if (lastWrapped.length > 0) {
-      // Pop the wrapped tail off and re-emit it with the corner connector +
-      // straight indent continuation for any extra wrap rows.
-      for (let i = 0; i < lastWrapped.length; i += 1) lines.pop();
-      const tailLines = lastWrapped.map((piece, index) =>
-        truncateToWidth(`${index === 0 ? corner : indent}${piece}`, width, ""),
-      );
-      lines.push(...tailLines);
-    }
-  }
-
+  if (current) lines.push(current);
   return lines;
 }
 
-// ---------- step selection ------------------------------------------------
+function renderCollapsed(
+  theme: ThinkingThemeLike,
+  width: number,
+  steps: DerivedThinkingStep[],
+  activeStepId: string | undefined,
+  isActive: boolean,
+  nowMs: number,
+): string[] {
+  const step = pickCollapsedStep(steps, activeStepId);
+  if (!step) return [];
+
+  const label = "Thinking";
+  const icon = theme.fg(roleColor(step.role), step.icon);
+  const activity = isActive ? pulseGlyph(theme, nowMs) : theme.fg("dim", "·");
+  const activitySuffix = ` ${activity}`;
+  const activityWidth = visibleWidth(activitySuffix);
+  const prefix = `${theme.fg("muted", "│")} ${theme.fg("dim", label)} ${icon} `;
+  const continuationPrefix = `${theme.fg("muted", "│")} ${" ".repeat(visibleWidth(`${label} ${step.icon} `))}`;
+  const summaryLines = wrapCollapsedSummaryText(
+    theme,
+    step.summary,
+    Math.max(1, width - visibleWidth(prefix) - activityWidth),
+    Math.max(1, width - visibleWidth(continuationPrefix) - activityWidth),
+  );
+
+  if (summaryLines.length <= 1) {
+    return [truncateToWidth(`${prefix}${summaryLines[0] ?? renderThinkingInlineMarkup(theme, step.summary)}${activitySuffix}`, width, "")];
+  }
+
+  return summaryLines.map((line, index) => {
+    if (index === 0) return truncateToWidth(`${prefix}${line}`, width, "");
+    if (index === summaryLines.length - 1) return truncateToWidth(`${continuationPrefix}${line}${activitySuffix}`, width, "");
+    return truncateToWidth(`${continuationPrefix}${line}`, width, "");
+  });
+}
+
+// ---------- step selection -------------------------------------------------
 
 function pickCollapsedStep(steps: DerivedThinkingStep[], activeStepId?: string): DerivedThinkingStep | undefined {
   if (steps.length === 0) return undefined;
@@ -235,73 +324,12 @@ function pickCollapsedStep(steps: DerivedThinkingStep[], activeStepId?: string):
   )[0];
 }
 
-function stepHasEventType(step: DerivedThinkingStep, type: string): boolean {
-  return step.summaryEvents?.some((event) => event.type === type) ?? false;
-}
-
-function selectSummarySteps(steps: DerivedThinkingStep[], activeStepId?: string): DerivedThinkingStep[] {
+function selectSummarySteps(steps: DerivedThinkingStep[], _activeStepId?: string): DerivedThinkingStep[] {
   if (steps.length <= MAX_SUMMARY_STEPS) return steps;
-
-  const indexed = steps.map((step, index) => ({ step, index }));
-  const selected = new Set<number>();
-  const activeIndex = activeStepId ? steps.findIndex((step) => step.id === activeStepId) : -1;
-
-  let latestFailureIndex = -1;
-  let latestSuccessAfterFailureIndex = -1;
-  for (let i = 0; i < steps.length; i += 1) {
-    const step = steps[i]!;
-    if (step.hasExplicitFailure) {
-      latestFailureIndex = i;
-      latestSuccessAfterFailureIndex = -1;
-    }
-    if (latestFailureIndex !== -1 && step.hasExplicitSuccess && i > latestFailureIndex) {
-      latestSuccessAfterFailureIndex = i;
-    }
-  }
-
-  if (activeIndex !== -1) selected.add(activeIndex);
-  if (latestFailureIndex !== -1) selected.add(latestFailureIndex);
-  if (latestSuccessAfterFailureIndex !== -1) selected.add(latestSuccessAfterFailureIndex);
-
-  const scoreEntry = ({ step, index }: { step: DerivedThinkingStep; index: number }): number => {
-    let score = step.collapsedPriority ?? 0;
-    const isStaleSuccessBeforeLatestFailure =
-      step.hasExplicitSuccess && latestFailureIndex !== -1 && index < latestFailureIndex;
-    if (index === latestFailureIndex && latestSuccessAfterFailureIndex === -1) score += 120;
-    if (index === latestSuccessAfterFailureIndex) score += 110;
-    if (stepHasEventType(step, "decision") || stepHasEventType(step, "plan_change")) score += 80;
-    if (step.hasExplicitFailure) score += 50;
-    if (step.hasExplicitSuccess && !isStaleSuccessBeforeLatestFailure) score += 45;
-    if (isStaleSuccessBeforeLatestFailure) score -= 200;
-    if (
-      stepHasEventType(step, "focus")
-      && !stepHasEventType(step, "decision")
-      && !stepHasEventType(step, "plan_change")
-      && !step.hasExplicitFailure
-      && !step.hasExplicitSuccess
-    ) {
-      score -= 15;
-    }
-    return score + (index / 100);
-  };
-
-  const targetCount = Math.min(MAX_SUMMARY_STEPS, steps.length);
-  for (const entry of [...indexed].sort((left, right) => scoreEntry(right) - scoreEntry(left))) {
-    if (selected.size >= targetCount) break;
-    selected.add(entry.index);
-  }
-
-  return [...selected]
-    .sort((left, right) => left - right)
-    .map((index) => steps[index]!)
-    .slice(0, targetCount);
+  return steps.slice(-MAX_SUMMARY_STEPS);
 }
 
-// ---------- mode renderers ------------------------------------------------
-
-function pluralSteps(count: number): string {
-  return `${count} step${count === 1 ? "" : "s"}`;
-}
+// ---------- mode renderers -------------------------------------------------
 
 function renderGroupHeader(
   theme: ThinkingThemeLike,
@@ -309,59 +337,11 @@ function renderGroupHeader(
   totalSteps: number,
   isActive: boolean,
 ): string {
-  // Header format mirrors `Used 4 tools` / `Ran 5 commands` / `Explored 3
-  // targets` from pi-basic-tools' compact tool grouping: `<verb> <count>
-  // <noun>` with a single space separator and no `·` decoration.  The
-  // count is always the true total even when summary mode shows fewer
-  // selected steps below, again matching the basic-tool group title which
-  // reports the real number of tool calls in the group.
-  const titleColor = isActive ? "warning" : "muted";
-  const title = theme.fg(titleColor, "Thinking");
-  const subtitle = theme.fg("muted", pluralSteps(totalSteps));
-  return truncateToWidth(`${title} ${subtitle}`, width, "");
-}
-
-function renderCollapsed(
-  theme: ThinkingThemeLike,
-  width: number,
-  steps: DerivedThinkingStep[],
-  activeStepId: string | undefined,
-  isActive: boolean,
-  nowMs: number,
-): string[] {
-  const step = pickCollapsedStep(steps, activeStepId);
-  if (!step) return [];
-
-  const style = stepStyle(step, isActive);
-  const label = theme.fg(isActive ? "warning" : "muted", "Thinking");
-  const sep = theme.fg("muted", "·");
-  const glyph = theme.fg(roleColor(step.role), roleGlyph(step.role));
-  const pulse = isActive ? ` ${pulseGlyph(theme, nowMs)}` : "";
-  const pulseWidth = visibleWidth(pulse);
-  const prefix = `${label} ${sep} ${glyph} `;
-  const continuationPrefix = `${" ".repeat(visibleWidth("Thinking · "))}${" ".repeat(visibleWidth(`${roleGlyph(step.role)} `))}`;
-  const innerWidth = Math.max(8, width - visibleWidth(prefix) - pulseWidth);
-  const continuationWidth = Math.max(8, width - visibleWidth(continuationPrefix) - pulseWidth);
-
-  const summary = applyBold(theme, renderInline(theme, step.summary, style.summaryColor), style.bold);
-  const wrapped = wrapTextWithAnsi(summary, innerWidth);
-
-  if (wrapped.length <= 1) {
-    return [truncateToWidth(`${prefix}${wrapped[0] ?? summary}${pulse}`, width, "")];
-  }
-
-  const lines = wrapped.map((line, index) => {
-    const isLast = index === wrapped.length - 1;
-    if (index === 0) return truncateToWidth(`${prefix}${line}`, width, "");
-    const wrappedInContinuation = wrapTextWithAnsi(line, continuationWidth);
-    const useLine = wrappedInContinuation[0] ?? line;
-    return truncateToWidth(
-      `${continuationPrefix}${useLine}${isLast ? pulse : ""}`,
-      width,
-      "",
-    );
-  });
-  return lines;
+  const titleRole = isActive ? "warning" : "dim";
+  const title = theme.fg(titleRole, "Thinking Steps");
+  if (totalSteps <= 1) return truncateToWidth(title, width, "");
+  const count = theme.fg("muted", `  · ${totalSteps} thoughts`);
+  return truncateToWidth(`${title}${count}`, width, "");
 }
 
 function renderSummary(
@@ -371,10 +351,12 @@ function renderSummary(
   activeStepId: string | undefined,
   isActive: boolean,
 ): string[] {
+  const lines = [renderGroupHeader(theme, width, steps.length, isActive)];
   const visible = selectSummarySteps(steps, activeStepId);
-  const lines: string[] = [renderGroupHeader(theme, width, steps.length, isActive)];
-  for (const step of visible) {
-    lines.push(...wrapStepHeader(theme, width, step, step.id === activeStepId));
+  for (let index = 0; index < visible.length; index++) {
+    const step = visible[index]!;
+    const isLast = index === visible.length - 1;
+    lines.push(...wrapStepHeader(theme, width, step, step.id === activeStepId, isLast));
   }
   return lines;
 }
@@ -386,17 +368,25 @@ function renderExpanded(
   activeStepId: string | undefined,
   isActive: boolean,
 ): string[] {
-  const lines: string[] = [renderGroupHeader(theme, width, steps.length, isActive)];
-  for (let index = 0; index < steps.length; index += 1) {
+  const lines = [renderGroupHeader(theme, width, steps.length, isActive)];
+
+  for (let index = 0; index < steps.length; index++) {
     const step = steps[index]!;
     const isLast = index === steps.length - 1;
-    lines.push(...wrapStepHeader(theme, width, step, step.id === activeStepId));
-    lines.push(...renderStepBody(theme, width, step.body, isLast));
+    const isStepActive = step.id === activeStepId;
+    lines.push(...wrapStepHeader(theme, width, step, isStepActive, isLast));
+
+    const normalizedBody = step.body.trim();
+    if (!normalizedBody) continue;
+
+    const bodyPrefix = isLast ? "   " : `${theme.fg("muted", "│")}  `;
+    lines.push(...renderWrappedRawText(theme, normalizedBody, width, bodyPrefix));
   }
+
   return lines;
 }
 
-// ---------- public API ----------------------------------------------------
+// ---------- public API -----------------------------------------------------
 
 export function renderThinkingStepsLines(theme: ThinkingThemeLike, width: number, options: RenderOptions): string[] {
   if (options.steps.length === 0) return [];
