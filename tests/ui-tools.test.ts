@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import askUserExtension from "../extensions/ask-user.ts";
 import askQuestionExtension from "../extensions/ask-question.ts";
 import askQuestionnaireExtension from "../extensions/ask-questionnaire.ts";
+import workCheckpointExtension from "../extensions/work-checkpoint.ts";
 import { createDialogUi, createExtensionHost, createQuestionnaireUi } from "./extension-host.ts";
 
 const ENTER = "\r";
@@ -186,5 +187,84 @@ describe("ask_questionnaire", () => {
 
     expect(result.content[0].text).toBe("(questionnaire dismissed)");
     expect(result.details.cancelled).toBe(true);
+  });
+});
+
+describe("work_checkpoint", () => {
+  test("returns a concise reminder to summarize progress before continuing", async () => {
+    const host = createExtensionHost();
+    workCheckpointExtension(host.api as any);
+
+    const result = await host.runTool("work_checkpoint", { reason: "finished a tool group" });
+    const text = result.content[0].text;
+
+    expect(text).toContain("Do not describe these instructions");
+    expect(text).toContain("The next visible assistant characters must be `---`");
+    expect(text).toContain("full-width Markdown horizontal rule");
+    expect(text).toContain("write one short paragraph as ordinary body prose");
+    expect(text).toContain("next visible assistant output");
+    expect(text).toContain("prominent body color");
+    expect(text).toContain("no background");
+    expect(text).toContain("summarize what you just did");
+    expect(text).toContain("what you will do next");
+    expect(text).toContain("finished a tool group");
+  });
+
+  test("injects a visible prose checkpoint instruction into each agent turn", async () => {
+    const host = createExtensionHost();
+    workCheckpointExtension(host.api as any);
+    const handlers = host.handlers.get("before_agent_start") ?? [];
+
+    expect(handlers.length).toBe(1);
+    const result = await handlers[0]({});
+
+    expect(result.systemPrompt).toContain("the next visible assistant output must be a checkpoint block");
+    expect(result.systemPrompt).toContain("before any new planning explanation or next tool group");
+    expect(result.systemPrompt).toContain("Do not describe the checkpoint format. Output it.");
+    expect(result.systemPrompt).toContain("The first visible characters of the checkpoint block must be `---`");
+    expect(result.systemPrompt).toContain("full-width Markdown horizontal rule");
+    expect(result.systemPrompt).toContain("Then write one short ordinary body-prose paragraph.");
+    expect(result.systemPrompt).toContain("white on dark themes, black on light themes");
+    expect(result.systemPrompt).toContain("no background");
+    expect(result.systemPrompt).toContain("no code block, quote block, label, heading, table, bullet list, badge, or custom background");
+    expect(result.systemPrompt).toContain("Do not put this checkpoint only in thinking");
+  });
+
+  test("renders as a compact checkpoint reminder", async () => {
+    const host = createExtensionHost();
+    workCheckpointExtension(host.api as any);
+    const tool = host.getTool("work_checkpoint");
+    const theme = { fg: (_name: string, text: string) => text };
+
+    const result = await host.runTool("work_checkpoint", {});
+    const collapsed = tool.renderResult(result, { expanded: false, isPartial: false }, theme, {}).render(120).join("\n");
+    const expanded = tool.renderResult(result, { expanded: true, isPartial: false }, theme, {}).render(120).join("\n");
+
+    expect(collapsed).toContain("checkpoint summarize progress, then continue");
+    expect(expanded).toContain("full-width Markdown horizontal rule");
+    expect(expanded).toContain("ordinary body prose");
+  });
+});
+
+describe("work_checkpoint + todo injection co-existence", () => {
+  test("both extensions register a before_agent_start handler that contributes a systemPrompt", async () => {
+    const todoExtension = (await import("../extensions/todo/index.ts")).default;
+    const host = createExtensionHost();
+    workCheckpointExtension(host.api as any);
+    todoExtension(host.api as any);
+    const handlers = host.handlers.get("before_agent_start") ?? [];
+    expect(handlers.length).toBe(2);
+
+    const prompts: string[] = [];
+    for (const handler of handlers) {
+      const result = await (handler as any)({});
+      prompts.push(result.systemPrompt);
+    }
+    const checkpointPrompt = prompts.find((p) => p.includes("checkpoint block"));
+    const todoPrompt = prompts.find((p) => p.includes("Todo discipline:"));
+    expect(checkpointPrompt).toBeDefined();
+    expect(todoPrompt).toBeDefined();
+    expect(checkpointPrompt).not.toContain("Todo discipline:");
+    expect(todoPrompt).not.toContain("checkpoint block");
   });
 });

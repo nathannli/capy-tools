@@ -262,4 +262,23 @@ describe("todo extension wiring", () => {
     expect(indexSource).not.toMatch(/from\s+["'][^"']*rpiv-i18n/);
     expect(indexSource).not.toMatch(/require\(["'][^"']*rpiv-i18n/);
   });
+
+  test("injects a todo discipline section into each agent turn", async () => {
+    const host = createExtensionHost();
+    todoExtension(host.api as any);
+    const handlers = host.handlers.get("before_agent_start") ?? [];
+    expect(handlers.length).toBe(1);
+
+    const result = await (handlers[0] as any)({});
+    expect(result.systemPrompt).toContain("Todo discipline:");
+    expect(result.systemPrompt).toContain("3+ steps");
+    expect(result.systemPrompt).toContain("multi-task list");
+    expect(result.systemPrompt).toContain("not yet captured");
+    expect(result.systemPrompt).toContain("Skip it for single trivial requests");
+    expect(result.systemPrompt).toContain("purely conversational");
+    expect(result.systemPrompt).toContain("mark it `in_progress`");
+    expect(result.systemPrompt).toContain("mark it `completed`");
+    expect(result.systemPrompt).toContain("never batch completions");
+    expect(result.systemPrompt).toContain("Exactly one task is `in_progress` at a time");
+  });
 });
