@@ -17,8 +17,17 @@ function runRequired(command: string, args: string[], cwd: string) {
 
 function plainTheme() {
   return {
+    bg: (_name: string, text: string) => text,
     fg: (_name: string, text: string) => text,
     bold: (text: string) => text,
+  };
+}
+
+function taggingTheme() {
+  return {
+    bg: (color: string, text: string) => `<bg:${color}>${text}</bg:${color}>`,
+    fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
+    bold: (text: string) => `<b>${text}</b>`,
   };
 }
 
@@ -55,11 +64,13 @@ describe("repo_map", () => {
       const tool = host.getTool("repo_map");
       expect(renderComponent(tool.renderCall({ path: "." }, plainTheme(), {}))).toBe("");
       const collapsed = renderComponent(tool.renderResult(result, { expanded: false, isPartial: false }, plainTheme(), {}));
-      expect(collapsed).toContain("repo map pi-basic-tools-test-");
+      expect(collapsed).toContain("Map pi-basic-tools-test-");
       expect(collapsed).toContain("(to expand)");
       expect(collapsed).not.toContain("src/main.ts");
       const expanded = renderComponent(tool.renderResult(result, { expanded: true, isPartial: false }, plainTheme(), {}));
-      expect(expanded).toContain("src/main.ts");
+      expect(expanded).toContain("Map pi-basic-tools-test-");
+      expect(expanded).not.toContain("src/main.ts");
+      expect(result.content[0].text).toContain("src/main.ts");
     });
   });
 });
@@ -115,14 +126,15 @@ describe("read_block", () => {
       expect(call).toBe("");
 
       const collapsed = renderComponent(tool.renderResult(result, { expanded: false, isPartial: false }, plainTheme(), {}));
-      expect(collapsed).toBe("read block long.ts:1-17 (to expand)");
+      expect(collapsed).toBe("Read long.ts:1-17\n(to expand)");
       expect(collapsed).not.toContain("return value8");
       expect(collapsed).not.toContain("value1 = 1");
       expect(collapsed).not.toContain("value15 = 15");
 
       const expanded = renderComponent(tool.renderResult(result, { expanded: true, isPartial: false }, plainTheme(), {}));
-      expect(expanded).toContain("L 2:   const value1 = 1;");
-      expect(expanded).toContain("L16:   const value15 = 15;");
+      expect(expanded).toContain("Read long.ts:1-17");
+      expect(expanded).not.toContain("L 2:   const value1 = 1;");
+      expect(result.content[0].text).toContain("L16:   const value15 = 15;");
     });
   });
 
@@ -213,10 +225,12 @@ describe("symbol_outline", () => {
       const tool = host.getTool("symbol_outline");
       expect(renderComponent(tool.renderCall({ path: "sample.ts" }, plainTheme(), {}))).toBe("");
       const collapsed = renderComponent(tool.renderResult(outline, { expanded: false, isPartial: false }, plainTheme(), {}));
-      expect(collapsed).toBe("symbol outline sample.ts: 4 blocks (to expand)");
+      expect(collapsed).toBe("Outline sample.ts\n(to expand)");
       expect(collapsed).not.toContain("export function area");
       const expanded = renderComponent(tool.renderResult(outline, { expanded: true, isPartial: false }, plainTheme(), {}));
-      expect(expanded).toContain("[2] L5-L7 function area (3 lines)");
+      expect(expanded).toContain("Outline sample.ts");
+      expect(expanded).not.toContain("[2] L5-L7 function area (3 lines)");
+      expect(outline.content[0].text).toContain("[2] L5-L7 function area (3 lines)");
     });
   });
 
@@ -358,8 +372,9 @@ describe("enable-builtin-search", () => {
       expect(renderComponent(tool.renderCall({}, plainTheme(), {}))).toBe("");
     }
     const grepResult = { content: [{ type: "text", text: "a.ts:1: match\nb.ts:2: match" }], details: {} };
-    expect(renderComponent(defaultHost.getTool("grep").renderResult(grepResult, { expanded: false, isPartial: false }, plainTheme(), {}))).toBe("grep 2 matches (to expand)");
-    expect(renderComponent(defaultHost.getTool("grep").renderResult(grepResult, { expanded: true, isPartial: false }, plainTheme(), {}))).toContain("a.ts:1: match");
+    expect(renderComponent(defaultHost.getTool("grep").renderResult(grepResult, { expanded: false, isPartial: false }, plainTheme(), {}))).toBe("Search results\n(to expand)");
+    expect(renderComponent(defaultHost.getTool("grep").renderResult(grepResult, { expanded: true, isPartial: false }, plainTheme(), {}))).not.toContain("a.ts:1: match");
+    expect(grepResult.content[0].text).toContain("a.ts:1: match");
 
     const noBuiltinHost = createExtensionHost({ activeTools: ["sourcegraph"], allTools });
     enableBuiltinSearchExtension(noBuiltinHost.api as any);
@@ -393,17 +408,18 @@ describe("enable-builtin-search", () => {
     });
 
     const supersededHead = renderComponent(grep.renderCall({ pattern: "renderResult", path: "extensions" }, plainTheme(), headContext));
-    expect(supersededHead).toContain("grep");
+    expect(supersededHead).toContain("Search");
     expect(supersededHead).toContain("renderResult");
     expect(supersededHead).not.toContain("TOOLS");
 
     const grouped = renderComponent(find.renderCall({ pattern: "*.ts", path: "extensions" }, plainTheme(), findContext));
-    expect(grouped).toContain("find");
+    expect(grouped).toContain("Explored 2 targets");
+    expect(grouped).toContain("Find");
     expect(grouped).toContain("*.ts");
 
     await host.emit("tool_execution_start", { toolName: "job", toolCallId: "job-1", args: {} });
     const nextGroup = renderComponent(ls.renderCall({ path: "." }, plainTheme(), { toolCallId: "ls-1", executionStarted: true, expanded: false, invalidate() {} }));
-    expect(nextGroup).toContain("ls");
+    expect(nextGroup).toContain("List");
     expect(nextGroup).not.toContain("grep");
   });
 
@@ -425,7 +441,7 @@ describe("enable-builtin-search", () => {
     await host.emit("turn_start", { turnIndex: 2 });
     await host.emit("agent_start", {});
     const grouped = renderComponent(find.renderCall({ pattern: "beta" }, plainTheme(), findContext));
-    expect(grouped).toContain("find");
+    expect(grouped).toContain("Find");
     expect(grouped).toContain("beta");
   });
 
@@ -440,7 +456,7 @@ describe("enable-builtin-search", () => {
 
     const grep = host.getTool("grep");
     const rendered = renderComponent(grep.renderCall({}, plainTheme(), { toolCallId: "grep-empty", executionStarted: true, expanded: false, invalidate() {} }));
-    expect(rendered).toContain("grep");
+    expect(rendered).toContain("Search");
     expect(rendered).not.toContain("grep grep");
   });
 
@@ -462,7 +478,7 @@ describe("enable-builtin-search", () => {
     await host.emit("tool_execution_start", { id: "find-two" });
     const grouped = renderComponent(find.renderCall({ pattern: "beta" }, plainTheme(), secondContext));
 
-    expect(grouped).toContain("find");
+    expect(grouped).toContain("Find");
     expect(grouped).toContain("beta");
   });
 
@@ -484,7 +500,7 @@ describe("enable-builtin-search", () => {
     await host.emit("message_update", { message: { content: [{ type: "toolCall", id: "find-partial", name: "find", arguments: { pattern: "beta" } }] } });
     const grouped = renderComponent(find.renderCall({ pattern: "beta" }, plainTheme(), secondContext));
 
-    expect(grouped).toContain("find");
+    expect(grouped).toContain("Find");
     expect(grouped).toContain("beta");
   });
 
@@ -502,7 +518,7 @@ describe("enable-builtin-search", () => {
     const call = renderComponent(grep.renderCall({ pattern: "alpha" }, plainTheme(), context));
     const result = renderComponent(grep.renderResult({ content: [{ type: "text", text: "file.ts:1: alpha" }] }, { expanded: false, isPartial: false }, plainTheme(), context));
 
-    expect(call).toContain("grep");
+    expect(call).toContain("Search");
     expect(call).toContain("alpha");
     expect(result).toBe("");
   });
@@ -524,7 +540,7 @@ describe("enable-builtin-search", () => {
     await host.emit("message_update", { message: { content: [{ type: "text", text: "Done with the old sequence." }] } });
 
     const next = renderComponent(grep.renderCall({ pattern: "fresh" }, plainTheme(), { toolCallId: "fresh-grep", executionStarted: true, expanded: false, invalidate() {} }));
-    expect(next).toContain("grep");
+    expect(next).toContain("Search");
     expect(next).toContain("fresh");
     expect(next).not.toContain("old");
   });
@@ -544,15 +560,117 @@ describe("enable-builtin-search", () => {
     const firstContext = { toolCallId: "visible-grep", executionStarted: true, expanded: false, invalidate() { invalidated = true; } };
     const secondContext = { toolCallId: "visible-find", executionStarted: true, expanded: false, invalidate() {} };
 
-    expect(renderComponent(grep.renderCall({ pattern: "alpha" }, plainTheme(), firstContext))).toContain("grep");
+    expect(renderComponent(grep.renderCall({ pattern: "alpha" }, plainTheme(), firstContext))).toContain("Search");
     const latest = renderComponent(find.renderCall({ pattern: "beta" }, plainTheme(), secondContext));
 
     expect(invalidated).toBe(true);
-    expect(latest).toContain("find");
+    expect(latest).toContain("Find");
     expect(latest).toContain("beta");
     const superseded = renderComponent(grep.renderCall({ pattern: "alpha" }, plainTheme(), firstContext));
-    expect(superseded).toContain("grep");
+    expect(superseded).toContain("Search");
     expect(superseded).toContain("alpha");
+  });
+
+  test("updates the Codex-style call row after the result arrives", async () => {
+    const enableBuiltinSearchExtension = (await import("../extensions/enable-builtin-search.ts")).default;
+    const { resetBasicToolGroupingForTests } = await import("../extensions/basic-tool-grouping.ts");
+    resetBasicToolGroupingForTests();
+
+    const allTools = ["read", "bash", "edit", "write", "grep", "find", "ls"].map(builtinTool);
+    const host = createExtensionHost({ activeTools: ["read", "bash", "edit", "write"], allTools });
+    enableBuiltinSearchExtension(host.api as any);
+
+    const bash = host.getTool("bash");
+    let invalidated = false;
+    const context = { toolCallId: "bash-result", executionStarted: true, expanded: false, invalidate() { invalidated = true; } };
+    const component = bash.renderCall({ command: "echo codex-style" }, plainTheme(), context);
+    expect(renderComponent(component)).toContain("Ran echo codex-style");
+
+    const result = renderComponent(bash.renderResult({ content: [{ type: "text", text: "codex-style\n" }] }, { expanded: false, isPartial: false }, plainTheme(), context));
+
+    expect(result).toBe("");
+    expect(invalidated).toBe(false);
+    // After the result arrives the detail is folded inline into the per-call
+    // headline (`• Ran <cmd> · 1 output lines`), so we look for it there
+    // rather than as a `└` child row.
+    expect(renderComponent(component)).toContain("1 output lines");
+    expect(renderComponent(component)).toContain("Ran echo codex-style");
+  });
+
+  test("summarizes grouped command tools with a natural Codex-style title", async () => {
+    const enableBuiltinSearchExtension = (await import("../extensions/enable-builtin-search.ts")).default;
+    const { resetBasicToolGroupingForTests } = await import("../extensions/basic-tool-grouping.ts");
+    resetBasicToolGroupingForTests();
+
+    const allTools = ["read", "bash", "edit", "write", "grep", "find", "ls"].map(builtinTool);
+    const host = createExtensionHost({ activeTools: ["read", "bash", "edit", "write"], allTools });
+    enableBuiltinSearchExtension(host.api as any);
+
+    const bash = host.getTool("bash");
+    renderComponent(bash.renderCall({ command: "pwd" }, plainTheme(), { toolCallId: "bash-title-1", executionStarted: true, expanded: false, invalidate() {} }));
+    const grouped = renderComponent(bash.renderCall({ command: "ls" }, plainTheme(), { toolCallId: "bash-title-2", executionStarted: true, expanded: false, invalidate() {} }));
+
+    expect(grouped).toContain("Ran 2 commands");
+    expect(grouped).toContain("Ran pwd");
+    expect(grouped).toContain("Ran ls");
+    expect(grouped).not.toContain("TOOLS");
+  });
+
+  test("limits Codex-style action continuation to four aligned guide lines and hides raw output details", async () => {
+    const enableBuiltinSearchExtension = (await import("../extensions/enable-builtin-search.ts")).default;
+    const { resetBasicToolGroupingForTests } = await import("../extensions/basic-tool-grouping.ts");
+    resetBasicToolGroupingForTests();
+
+    const allTools = ["read", "bash", "edit", "write", "grep", "find", "ls"].map(builtinTool);
+    const host = createExtensionHost({ activeTools: ["read", "bash", "edit", "write"], allTools });
+    enableBuiltinSearchExtension(host.api as any);
+
+    const bash = host.getTool("bash");
+    const context = { toolCallId: "bash-many-lines", executionStarted: true, expanded: false, invalidate() {} };
+    const component = bash.renderCall({ command: "printf many words that should wrap through the guide rail and then stop after four continuation rows" }, plainTheme(), context);
+    const callLines = component.render(34);
+
+    expect(callLines.filter((line) => line.startsWith("  │ ")).length).toBeLessThanOrEqual(4);
+    expect(callLines.every((line) => line.startsWith("• ") || line.startsWith("  │ "))).toBe(true);
+
+    const output = Array.from({ length: 12 }, (_value, index) => `line-${index + 1}`).join("\n");
+    renderComponent(bash.renderResult({ content: [{ type: "text", text: output }] }, { expanded: false, isPartial: false }, plainTheme(), context));
+    const rendered = renderComponent(component);
+
+    // Per-call render is single-line now; the "12 output lines" detail is rolled
+    // into the headline via ` · ` and may wrap into the continuation rail. The
+    // critical invariant is that raw output never reaches the per-call surface.
+    expect(rendered).toContain("output lines");
+    expect(rendered).not.toContain("line-1");
+    expect(rendered).not.toContain("  └ ");
+  });
+
+  test("leaves edit and write renderers on the built-in preview path", async () => {
+    const enableBuiltinSearchExtension = (await import("../extensions/enable-builtin-search.ts")).default;
+    const { resetBasicToolGroupingForTests } = await import("../extensions/basic-tool-grouping.ts");
+    resetBasicToolGroupingForTests();
+
+    const allTools = ["read", "bash", "edit", "write", "grep", "find", "ls"].map(builtinTool);
+    const host = createExtensionHost({ activeTools: ["read", "bash", "edit", "write"], allTools });
+    enableBuiltinSearchExtension(host.api as any);
+
+    const edit = host.getTool("edit");
+    const write = host.getTool("write");
+    const editRendered = renderComponent(edit.renderCall(
+      { path: "sample.ts", edits: [{ oldText: "old", newText: "new" }] },
+      plainTheme(),
+      { toolCallId: "edit-default", state: {}, cwd: process.cwd(), argsComplete: false, invalidate() {} },
+    ));
+    const writeRendered = renderComponent(write.renderCall(
+      { path: "sample.ts", content: "hello\n" },
+      plainTheme(),
+      { toolCallId: "write-default", lastComponent: undefined, argsComplete: false, expanded: false, isPartial: false },
+    ));
+
+    expect(editRendered).toContain("edit");
+    expect(writeRendered).toContain("write");
+    expect(editRendered).not.toContain("• Edited");
+    expect(writeRendered).not.toContain("• Edited");
   });
 
   test("preserves call details when later streaming updates have incomplete args", async () => {
@@ -609,7 +727,7 @@ describe("enable-builtin-search", () => {
       latest = renderComponent(grep.renderCall({ pattern: `needle-${index}` }, plainTheme(), { toolCallId: `grep-${index}`, executionStarted: true, expanded: false, invalidate() {} }));
     }
 
-    expect(latest).toContain("grep");
+    expect(latest).toContain("Search");
     expect(latest).toContain("needle-19");
     expect(latest).not.toContain("needle-0");
   });
@@ -629,8 +747,122 @@ describe("enable-builtin-search", () => {
       latest = renderComponent(grep.renderCall({ pattern: `cap-${index}` }, plainTheme(), { toolCallId: `cap-grep-${index}`, executionStarted: true, expanded: false, invalidate() {} }));
     }
 
-    expect(latest).toContain("grep");
+    expect(latest).toContain("Search");
     expect(latest).toContain("cap-12");
     expect(latest).not.toContain("cap-0");
+  });
+
+  test("treats work_checkpoint as a non-basic boundary outside grouped tools", async () => {
+    const enableBuiltinSearchExtension = (await import("../extensions/enable-builtin-search.ts")).default;
+    const workCheckpointExtension = (await import("../extensions/work-checkpoint.ts")).default;
+    const { resetBasicToolGroupingForTests } = await import("../extensions/basic-tool-grouping.ts");
+    resetBasicToolGroupingForTests();
+
+    const allTools = ["read", "bash", "edit", "write", "grep", "find", "ls", "work_checkpoint"].map(builtinTool);
+    const host = createExtensionHost({ activeTools: ["read", "bash", "edit", "write"], allTools });
+    enableBuiltinSearchExtension(host.api as any);
+    workCheckpointExtension(host.api as any);
+
+    const grep = host.getTool("grep");
+    const find = host.getTool("find");
+    renderComponent(grep.renderCall({ pattern: "before-checkpoint" }, plainTheme(), { toolCallId: "checkpoint-grep", executionStarted: true, expanded: false, invalidate() {} }));
+
+    await host.emit("tool_execution_start", { toolName: "work_checkpoint", toolCallId: "checkpoint", args: {} });
+    const next = renderComponent(find.renderCall({ pattern: "after-checkpoint" }, plainTheme(), { toolCallId: "checkpoint-find", executionStarted: true, expanded: false, invalidate() {} }));
+
+    expect(next).toContain("after-checkpoint");
+    expect(next).not.toContain("before-checkpoint");
+    expect(next).not.toContain("TOOLS");
+  });
+
+  test("compacts FFF plugin search results before their renderer can dump raw output", async () => {
+    const { compactExternalBasicToolResult } = await import("../extensions/basic-tool-grouping.ts");
+
+    const compacted = compactExternalBasicToolResult({
+      toolName: "ffgrep",
+      input: { pattern: "ExtensionAPI", path: "extensions/" },
+      content: [{ type: "text", text: "extensions/index.ts\n 1: import ExtensionAPI\n\nextensions/fetch.ts\n 2: import ExtensionAPI" }],
+      details: { totalMatched: 10, totalFiles: 4 },
+    });
+
+    expect(compacted?.content[0].text).toBe("Search ExtensionAPI in extensions/ · 10 results in 4 files");
+    expect(compacted?.content[0].text).not.toContain("extensions/index.ts");
+    expect((compacted?.details as any).compactedForDisplay).toBe(true);
+  });
+
+  test("skips optional FFF compatibility when those plugin tools are absent", async () => {
+    const { compactExternalBasicToolResult } = await import("../extensions/basic-tool-grouping.ts");
+
+    expect(compactExternalBasicToolResult({
+      toolName: "grep",
+      input: { pattern: "ExtensionAPI" },
+      content: [{ type: "text", text: "extensions/index.ts:1: ExtensionAPI" }],
+      details: { totalMatched: 1 },
+    })).toBeUndefined();
+
+    expect(compactExternalBasicToolResult({
+      input: { pattern: "ExtensionAPI" },
+      content: [{ type: "text", text: "missing toolName should be ignored" }],
+    })).toBeUndefined();
+  });
+
+  test("done basic-tool item line renders headline text in muted (not accent)", async () => {
+    const enableBuiltinSearchExtension = (await import("../extensions/enable-builtin-search.ts")).default;
+    const { resetBasicToolGroupingForTests } = await import("../extensions/basic-tool-grouping.ts");
+    resetBasicToolGroupingForTests();
+
+    const allTools = ["read", "bash", "edit", "write", "grep", "find", "ls"].map(builtinTool);
+    const host = createExtensionHost({ activeTools: ["read", "bash", "edit", "write"], allTools });
+    enableBuiltinSearchExtension(host.api as any);
+
+    const bash = host.getTool("bash");
+    const theme = taggingTheme();
+    const context = { toolCallId: "bash-color", executionStarted: true, expanded: false, invalidate() {} };
+    const component = bash.renderCall({ command: "git status" }, theme, context);
+    bash.renderResult({ content: [{ type: "text", text: "" }] }, { expanded: false, isPartial: false }, theme, context);
+
+    const rendered = renderComponent(component);
+    expect(rendered).toMatch(/<muted>Ran git status[^<]*<\/muted>/);
+    expect(rendered).not.toMatch(/<accent>Ran git status[^<]*<\/accent>/);
+  });
+
+  test("running basic-tool item uses warning ◐ marker with muted headline text", async () => {
+    const enableBuiltinSearchExtension = (await import("../extensions/enable-builtin-search.ts")).default;
+    const { resetBasicToolGroupingForTests } = await import("../extensions/basic-tool-grouping.ts");
+    resetBasicToolGroupingForTests();
+
+    const allTools = ["read", "bash", "edit", "write", "grep", "find", "ls"].map(builtinTool);
+    const host = createExtensionHost({ activeTools: ["read", "bash", "edit", "write"], allTools });
+    enableBuiltinSearchExtension(host.api as any);
+
+    const bash = host.getTool("bash");
+    const theme = taggingTheme();
+    const context = { toolCallId: "bash-running", executionStarted: true, expanded: false, invalidate() {} };
+    const component = bash.renderCall({ command: "sleep 10" }, theme, context);
+    const rendered = renderComponent(component);
+
+    expect(rendered).toContain("<warning>◐</warning>");
+    expect(rendered).toMatch(/<muted>Ran [^<]+<\/muted>/);
+    expect(rendered).not.toContain("<accent>");
+  });
+
+  test("errored basic-tool item uses error ! marker and error-colored headline text", async () => {
+    const enableBuiltinSearchExtension = (await import("../extensions/enable-builtin-search.ts")).default;
+    const { resetBasicToolGroupingForTests } = await import("../extensions/basic-tool-grouping.ts");
+    resetBasicToolGroupingForTests();
+
+    const allTools = ["read", "bash", "edit", "write", "grep", "find", "ls"].map(builtinTool);
+    const host = createExtensionHost({ activeTools: ["read", "bash", "edit", "write"], allTools });
+    enableBuiltinSearchExtension(host.api as any);
+
+    const bash = host.getTool("bash");
+    const theme = taggingTheme();
+    const context = { toolCallId: "bash-error", executionStarted: true, expanded: false, invalidate() {} };
+    const component = bash.renderCall({ command: "false" }, theme, context);
+    bash.renderResult({ content: [{ type: "text", text: "" }], isError: true }, { expanded: false, isPartial: false }, theme, context);
+
+    const rendered = renderComponent(component);
+    expect(rendered).toContain("<error>!</error>");
+    expect(rendered).toMatch(/<error>Ran [^<]+<\/error>/);
   });
 });
