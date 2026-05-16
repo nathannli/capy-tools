@@ -181,4 +181,55 @@ describe("grouping showcase - harmless combos", () => {
     // error glyph from shared visual module
     expect(collapsed).toContain("!");
   });
+
+  test("combo H: write_stdin polls/writes merge into parent exec_command meta", () => {
+    resetBasicToolGroupingForTests();
+    const theme = plainTheme();
+
+    // exec_command starts and gets a session_id back.
+    renderGroupedToolCall("exec_command", { command: "tail -f log.txt" }, theme, ctx("c1"));
+    renderGroupedToolResult(
+      "exec_command",
+      okResult("session started", { session_id: "abc123" }),
+      { expanded: false, isPartial: true },
+      theme,
+      ctx("c1"),
+    );
+
+    // write_stdin polls + a write — these MUST NOT render their own rows.
+    renderGroupedToolCall("write_stdin", { session_id: "abc123", chars: "" }, theme, ctx("s1"));
+    renderGroupedToolResult("write_stdin", okResult("poll #1", {}), { expanded: false, isPartial: false }, theme, ctx("s1"));
+    renderGroupedToolCall("write_stdin", { session_id: "abc123", chars: "" }, theme, ctx("s2"));
+    renderGroupedToolResult("write_stdin", okResult("poll #2", {}), { expanded: false, isPartial: false }, theme, ctx("s2"));
+    renderGroupedToolCall("write_stdin", { session_id: "abc123", chars: "y\n" }, theme, ctx("s3"));
+    renderGroupedToolResult("write_stdin", okResult("write", {}), { expanded: false, isPartial: false }, theme, ctx("s3"));
+
+    // Re-render the parent (final state).
+    const out = render(renderGroupedToolCall("exec_command", { command: "tail -f log.txt" }, theme, ctx("c1", false)), 80);
+    console.log("\n=== Combo H: stdin merge ===\n" + out);
+
+    // No stdin row, no separate stdin grouping.
+    expect(out).not.toContain("stdin");
+    expect(out).not.toContain("Ran 4 commands");
+    // Parent exec_command row carries the meta.
+    expect(out).toContain("tail -f log.txt");
+    expect(out).toContain("2 polls");
+    expect(out).toContain("1 write");
+  });
+
+  test("combo I: write_stdin without parent exec_command is dropped", () => {
+    resetBasicToolGroupingForTests();
+    const theme = plainTheme();
+
+    renderGroupedToolCall("write_stdin", { session_id: "missing", chars: "" }, theme, ctx("s1"));
+    renderGroupedToolResult("write_stdin", okResult("poll", {}), { expanded: false, isPartial: false }, theme, ctx("s1"));
+
+    // Add a bash command afterward so we have something to render.
+    renderGroupedToolCall("bash", { command: "echo hi" }, theme, ctx("b1"));
+    renderGroupedToolResult("bash", okResult("hi", {}), { expanded: false, isPartial: false }, theme, ctx("b1"));
+
+    const out = render(renderGroupedToolCall("bash", { command: "echo hi" }, theme, ctx("b1", false)), 80);
+    expect(out).not.toContain("stdin");
+    expect(out).toContain("Ran echo hi");
+  });
 });

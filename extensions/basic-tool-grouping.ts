@@ -55,7 +55,9 @@ const BASIC_TOOL_NAMES = new Set([
   "symbol_outline",
   "apply_patch",
   "exec_command",
-  "write_stdin",
+  // "write_stdin" intentionally omitted — its calls are aggregated onto the
+  // parent exec_command row's meta (see stdinAggregator below) instead of
+  // rendering as separate rows.
   "fetch",
   "sourcegraph",
   "fffind",
@@ -65,6 +67,7 @@ const BASIC_TOOL_NAMES = new Set([
 ]);
 
 const STATE_KEY = Symbol.for("pi-basic-tools.basic-tool-grouping.state");
+const STDIN_KEY = Symbol.for("pi-basic-tools.basic-tool-grouping.stdin");
 const MAX_COLLAPSED_ITEMS = 5;
 const MAX_GROUP_ITEMS = 12;
 
@@ -81,7 +84,78 @@ function getState(): BasicToolGroupingState {
   return created;
 }
 
+type StdinCounts = { polls: number; writes: number; interrupts: number };
+
+type StdinAggregatorState = {
+  countsBySession: Map<string, StdinCounts>;
+  // session_id → toolCallId of the parent exec_command row.
+  execCommandBySession: Map<string, string>;
+};
+
+function getStdinState(): StdinAggregatorState {
+  const existing = (globalThis as Record<PropertyKey, unknown>)[STDIN_KEY];
+  if (existing && typeof existing === "object") return existing as StdinAggregatorState;
+  const created: StdinAggregatorState = {
+    countsBySession: new Map<string, StdinCounts>(),
+    execCommandBySession: new Map<string, string>(),
+  };
+  (globalThis as Record<PropertyKey, unknown>)[STDIN_KEY] = created;
+  return created;
+}
+
 const state = getState();
+const stdinState = getStdinState();
+
+function classifyStdinChars(chars: unknown): "polls" | "writes" | "interrupts" {
+  if (chars === "") return "interrupts";
+  if (typeof chars === "string" && chars.length > 0) return "writes";
+  return "polls";
+}
+
+function recordStdinCall(sessionId: string | undefined, chars: unknown): void {
+  if (!sessionId) return;
+  const counts = stdinState.countsBySession.get(sessionId) ?? { polls: 0, writes: 0, interrupts: 0 };
+  counts[classifyStdinChars(chars)] += 1;
+  stdinState.countsBySession.set(sessionId, counts);
+  const parent = stdinState.execCommandBySession.get(sessionId);
+  if (parent) {
+    const parentItem = state.itemsByCallId.get(parent);
+    if (parentItem) {
+      bumpGroup(groupFor(parentItem));
+      parentItem.invalidate?.();
+    }
+  }
+}
+
+function recordExecCommandSession(toolCallId: string, sessionId: string | undefined): void {
+  if (!sessionId) return;
+  stdinState.execCommandBySession.set(sessionId, toolCallId);
+  const parentItem = state.itemsByCallId.get(toolCallId);
+  if (parentItem) {
+    bumpGroup(groupFor(parentItem));
+    parentItem.invalidate?.();
+  }
+}
+
+function execCommandSessionFor(item: ToolItem): string | undefined {
+  for (const [sessionId, callId] of stdinState.execCommandBySession) {
+    if (callId === item.toolCallId) return sessionId;
+  }
+  return undefined;
+}
+
+function stdinMetaFor(item: ToolItem): string | undefined {
+  if (item.toolName !== "exec_command") return undefined;
+  const sessionId = execCommandSessionFor(item);
+  if (!sessionId) return undefined;
+  const counts = stdinState.countsBySession.get(sessionId);
+  if (!counts) return undefined;
+  const parts: string[] = [];
+  if (counts.polls > 0) parts.push(`${counts.polls} poll${counts.polls === 1 ? "" : "s"}`);
+  if (counts.writes > 0) parts.push(`${counts.writes} write${counts.writes === 1 ? "" : "s"}`);
+  if (counts.interrupts > 0) parts.push(`${counts.interrupts} interrupt${counts.interrupts === 1 ? "" : "s"}`);
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
 
 function safeKeyHint(keybinding: string, description: string): string {
   try {
@@ -223,6 +297,11 @@ function visualRoleFor(item: ToolItem): VisualRole {
   }
 }
 
+function mergeMeta(...parts: Array<string | undefined>): string | undefined {
+  const list = parts.filter((part): part is string => typeof part === "string" && part.length > 0);
+  return list.length > 0 ? list.join(" · ") : undefined;
+}
+
 function formatTreeItem(item: ToolItem, theme: any, width: number, isLast: boolean): string[] {
   const headline = actionHeadline(item);
   const summary = displaySummary(item);
@@ -233,7 +312,7 @@ function formatTreeItem(item: ToolItem, theme: any, width: number, isLast: boole
     role: visualRoleFor(item),
     status: statusFor(item),
     headline,
-    meta: summary.detail,
+    meta: mergeMeta(summary.detail, stdinMetaFor(item)),
   });
 }
 
@@ -371,7 +450,8 @@ class BasicToolItemComponent implements Component {
     })();
     const textColor = status === "error" ? "error" : "muted";
     const headlinePainted = this.theme.fg(textColor, headline);
-    const metaPainted = summary.detail ? this.theme.fg(textColor, `  · ${summary.detail}`) : "";
+    const meta = mergeMeta(summary.detail, stdinMetaFor(this.item));
+    const metaPainted = meta ? this.theme.fg(textColor, `  · ${meta}`) : "";
     const line = `${this.theme.fg(marker.color, marker.glyph)} ${headlinePainted}${metaPainted}`;
     return [truncateToWidth(line, Math.max(1, width), "")];
   }
@@ -402,6 +482,8 @@ export function resetBasicToolGroupingForTests(): void {
   state.currentGroup = undefined;
   state.nextGroupId = 1;
   state.installed = false;
+  stdinState.countsBySession.clear();
+  stdinState.execCommandBySession.clear();
 }
 
 export function installBasicToolGrouping(pi: { on?: (event: string, handler: Function) => void }): void {
@@ -431,6 +513,12 @@ export function installBasicToolGrouping(pi: { on?: (event: string, handler: Fun
           sequenceGroup = undefined;
           closeCurrentGroup();
         }
+        continue;
+      }
+      if (part.name === "write_stdin") {
+        const args = part.arguments ?? {};
+        const sessionId = typeof args?.session_id === "string" ? args.session_id : undefined;
+        recordStdinCall(sessionId, args?.chars);
         continue;
       }
       const basic = isBasicTool(part.name);
@@ -542,6 +630,11 @@ export function summarizeToolResult(toolName: string, result: any, fallback?: Ba
 }
 
 export function renderGroupedToolCall(toolName: string, args: Record<string, any>, theme: any, context: any, summary: BasicToolSummary = summarizeToolCall(toolName, args)): Component {
+  if (toolName === "write_stdin") {
+    const sessionId = typeof args?.session_id === "string" ? args.session_id : undefined;
+    recordStdinCall(sessionId, args?.chars);
+    return emptyComponent();
+  }
   if (!canGroupTool(context)) return emptyComponent();
   const toolCallId = String(context.toolCallId);
   const item = getOrCreateItem(toolName, toolCallId, summary);
@@ -557,6 +650,13 @@ export function renderGroupedToolCall(toolName: string, args: Record<string, any
 }
 
 export function renderGroupedToolResult(toolName: string, result: any, options: { expanded?: boolean; isPartial?: boolean }, theme: any, context: any, summary?: BasicToolSummary): Component {
+  if (toolName === "write_stdin") return emptyComponent();
+  if (toolName === "exec_command") {
+    const sessionId = result?.details?.session_id;
+    if (typeof sessionId === "string" && context?.toolCallId) {
+      recordExecCommandSession(String(context.toolCallId), sessionId);
+    }
+  }
   if (!canGroupTool(context)) return emptyComponent();
   const toolCallId = String(context.toolCallId);
   const item = getOrCreateItem(toolName, toolCallId, summary ?? summarizeToolCall(toolName, context?.args ?? {}));
