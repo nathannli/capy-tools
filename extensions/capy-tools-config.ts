@@ -221,25 +221,6 @@ async function readJson(path: string): Promise<unknown | undefined> {
 async function writeSettings(settings: CapyToolsSettings): Promise<void> {
   await mkdir(dirname(CAPY_TOOLS_CONFIG_PATH), { recursive: true });
   await writeFile(CAPY_TOOLS_CONFIG_PATH, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
-  // Also sync tools config back to settings.json for unified management
-  await syncToolsToPiSettings(settings.tools);
-}
-
-async function syncToolsToPiSettings(tools: ToolsConfig): Promise<void> {
-  try {
-    const raw = await readJson(LEGACY_PI_SETTINGS_PATH);
-    const piSettings: Record<string, unknown> = (raw && typeof raw === "object")
-      ? { ...raw as Record<string, unknown> }
-      : {};
-    piSettings["capyTools"] = {
-      ...((piSettings["capyTools"] as Record<string, unknown>) ?? {}),
-      tools,
-    };
-    await mkdir(dirname(LEGACY_PI_SETTINGS_PATH), { recursive: true });
-    await writeFile(LEGACY_PI_SETTINGS_PATH, `${JSON.stringify(piSettings, null, 2)}\n`, "utf8");
-  } catch {
-    // Non-fatal: tools still saved to capy-tools.json
-  }
 }
 
 export async function restoreCapyToolsSettings(): Promise<CapyToolsSettings> {
@@ -281,25 +262,6 @@ export async function restoreCapyToolsSettings(): Promise<CapyToolsSettings> {
         codexFast: legacyCodexFast,
       };
       shouldWrite = true;
-    }
-  }
-
-  currentSettings = next;
-
-  if (!unifiedObject || unifiedObject.tools === undefined) {
-    const piSettings = await readJson(LEGACY_PI_SETTINGS_PATH);
-    if (piSettings && typeof piSettings === "object") {
-      const capyTools = (piSettings as Record<string, unknown>)["capyTools"];
-      if (capyTools && typeof capyTools === "object") {
-        const toolsFromSettings = (capyTools as Record<string, unknown>)["tools"];
-        if (toolsFromSettings) {
-          next = {
-            ...next,
-            tools: normalizeToolsConfig(toolsFromSettings),
-          };
-          shouldWrite = true;
-        }
-      }
     }
   }
 
