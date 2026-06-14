@@ -438,10 +438,11 @@ export default function applyPatchExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "apply_patch",
     label: "apply_patch",
-    description: "Apply a Codex-style patch to files. Supports add, update, delete, and move operations; absolute paths are allowed and writes run with the extension process' filesystem permissions.",
-    promptSnippet: "Apply Codex-style patches to files with add/update/delete/move operations",
+    description: "Apply a patch across one or more files in a single call. Handles add, update, delete, and move across multiple files; absolute paths allowed. Best for cross-file changes where individual edits would be tedious.",
+    promptSnippet: "Apply patches across multiple files with add/update/delete/move in one call",
     promptGuidelines: [
-      "Use apply_patch for precise multi-file edits when exact text replacement is too awkward.",
+      "Use apply_patch when a change spans multiple files — all hunks apply in one tool call instead of N separate edits.",
+      "For single-file edits, the patch tool with old_str/new_str is usually simpler; apply_patch shines for cross-file changes.",
       "Patch text must start with *** Begin Patch and end with *** End Patch.",
       "This tool can write absolute paths and delete or move files; inspect paths carefully before using it.",
       "This tool is a direct extension-process filesystem writer, not the built-in bash approval flow.",
