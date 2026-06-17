@@ -4,6 +4,68 @@ Capy Tools is a capybara-flavoured toolkit for pi, published on npm as `@capyup/
 
 This package bundles a practical set of editing, fetch, web-reference, compact basic-tool UI, todo, proactive auto-compaction, command history, custom model effort controls, Codex-style goals, RTK command-output compression, working-message, and built-in search activation extensions split out from `pi-goodstuff` and related standalone packages.
 
+## Installation
+
+### Install from npm
+
+```bash
+pi install npm:@capyup/capy-tools
+```
+
+### Manual install from this repo
+
+Clone, build the bundled extensions, and register the package with pi from the repo root:
+
+```bash
+git clone https://github.com/capyup/capy-tools.git
+cd capy-tools
+npm install
+npm run build
+pi install .
+```
+
+`pi install` accepts an absolute or relative local path. Relative paths resolve against the settings file that stores them. Use `-l` to write the package entry to project settings (`.pi/settings.json`) instead of global settings (`~/.pi/agent/settings.json`):
+
+```bash
+pi install -l .
+```
+
+Equivalent settings entry:
+
+```json
+{
+  "packages": ["/absolute/path/to/capy-tools"]
+}
+```
+
+To try the repo without installing, load the TypeScript entrypoint for one session:
+
+```bash
+pi -e extensions/index.ts
+```
+
+The published npm tarball loads prebuilt `extensions/dist/extensions/index.js`. After editing source in a clone, run `npm run build` before restarting pi or running `/reload`.
+
+### External dependencies
+
+`fetch` needs [MarkItDown](https://github.com/microsoft/markitdown) on `PATH`. Recommended install:
+
+```bash
+brew install pipx          # macOS; use your platform package manager elsewhere
+pipx install 'markitdown[all]'
+markitdown --version
+```
+
+Activated built-in `grep` and `find` use pi's managed `rg` and `fd`; install them on `PATH` or let pi download them when needed. RTK bash rewriting is optional and activates when `rtk` >= 0.23.0 is on `PATH`.
+
+### After installing
+
+If pi is already running, reload extensions:
+
+```text
+/reload
+```
+
 ## Included extensions
 
 - `fetch`
@@ -242,45 +304,6 @@ Several formerly standalone pi packages are bundled directly. See [`docs/bundled
 - MarkItDown upstream requires Python 3.10 or newer.
 - `rtk` integration is optional but active when `rtk` >= 0.23.0 is available on `PATH`; without it, Capy Tools leaves bash commands unchanged and reports the missing binary in the UI.
 - Recommended installation method for MarkItDown: `pipx`, so the `markitdown` CLI is available on `PATH` without modifying the package itself.
-
-## Installation
-
-Install the pi package:
-
-```bash
-pi install npm:@capyup/capy-tools
-```
-
-Install `pipx` if it is not already available:
-
-```bash
-brew install pipx
-```
-
-Alternative `pipx` installation:
-
-```bash
-python3 -m pip install --user pipx
-python3 -m pipx ensurepath
-```
-
-Install MarkItDown for the `fetch` tool:
-
-```bash
-pipx install 'markitdown[all]'
-```
-
-Verify that MarkItDown is available:
-
-```bash
-markitdown --version
-```
-
-If pi is already running, reload extensions after installing or updating dependencies:
-
-```text
-/reload
-```
 
 ## Testing
 
