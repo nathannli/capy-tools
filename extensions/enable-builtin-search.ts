@@ -3,6 +3,15 @@ import { createBashTool, createEditTool, createEditToolDefinition, createFindToo
 import { Text } from "@earendil-works/pi-tui";
 import { canGroupTool, installBasicToolGrouping, renderGroupedToolCall, renderGroupedToolResult, summarizeToolCall } from "./basic-tool-grouping.ts";
 import { hasRtk, rtkSpawnHook } from "./rtk.ts";
+import {
+  captureWriteExecutionMeta,
+  recordWriteExecutionMeta,
+  renderRichEditCall,
+  renderRichEditResult,
+  renderRichWriteCall,
+  renderRichWriteResult,
+  type WriteExecutionMeta,
+} from "./rich-diff/edit-write-renderer.ts";
 
 const DEFAULT_BUILTINS = new Set(["read", "bash", "edit", "write"]);
 const SEARCH_BUILTINS = ["grep", "find", "ls"] as const;
@@ -51,6 +60,7 @@ function registerCompactBuiltInRenderers(pi: ExtensionAPI) {
   const grep = createGrepTool(cwd);
   const find = createFindTool(cwd);
   const ls = createLsTool(cwd);
+  const writeExecutionMetaByToolCallId = new Map<string, WriteExecutionMeta>();
 
   pi.registerTool({
     name: "read",
@@ -93,17 +103,6 @@ function registerCompactBuiltInRenderers(pi: ExtensionAPI) {
     },
   });
 
-  // Force `expanded: true` on edit/write renderers so the full diff / full
-  // file contents always show without the user pressing ctrl+o. Upstream
-  // write.ts caps preview at 10 lines when context.expanded is false (see
-  // node_modules/.../core/tools/write.js formatWriteCall, maxLines=10) and
-  // appends a "(... N more lines, ctrl+o to expand)" hint. We surface the
-  // entire content unconditionally — if the user wants to scroll past it,
-  // pi's existing transcript scrollback handles that. Edit currently has no
-  // own fold logic, but we pass expanded:true defensively in case upstream
-  // adds one later. Both renderCall AND renderResult get the override.
-  const forceExpanded = (context: any) => ({ ...context, expanded: true });
-
   pi.registerTool({
     name: "edit",
     label: edit.label,
@@ -113,10 +112,10 @@ function registerCompactBuiltInRenderers(pi: ExtensionAPI) {
     parameters: edit.parameters,
     renderShell: "self",
     renderCall(args, theme, context) {
-      return edit.renderCall(args, theme, forceExpanded(context));
+      return renderRichEditCall(args, theme, context ?? {});
     },
     renderResult(result, options, theme, context) {
-      return edit.renderResult(result, { ...options, expanded: true }, theme, forceExpanded(context));
+      return renderRichEditResult(result, options, theme, context);
     },
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       return createEditTool(ctx.cwd).execute(toolCallId, params, signal, onUpdate);
@@ -132,12 +131,13 @@ function registerCompactBuiltInRenderers(pi: ExtensionAPI) {
     parameters: write.parameters,
     renderShell: "self",
     renderCall(args, theme, context) {
-      return write.renderCall(args, theme, forceExpanded(context));
+      return renderRichWriteCall(args, theme, context ?? {});
     },
     renderResult(result, options, theme, context) {
-      return write.renderResult(result, { ...options, expanded: true }, theme, forceExpanded(context));
+      return renderRichWriteResult(result, options, theme, context, writeExecutionMetaByToolCallId);
     },
     async execute(toolCallId, params, signal, onUpdate, ctx) {
+      recordWriteExecutionMeta(writeExecutionMetaByToolCallId, toolCallId, captureWriteExecutionMeta(ctx.cwd, params.path));
       return createWriteTool(ctx.cwd).execute(toolCallId, params, signal, onUpdate);
     },
   });

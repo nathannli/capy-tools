@@ -647,7 +647,7 @@ describe("enable-builtin-search", () => {
     expect(rendered).not.toContain("  └ ");
   });
 
-  test("leaves edit and write renderers on the built-in preview path", async () => {
+  test("renders edit and write with the rich diff UI", async () => {
     const enableBuiltinSearchExtension = (await import("../extensions/enable-builtin-search.ts")).default;
     const { resetBasicToolGroupingForTests } = await import("../extensions/basic-tool-grouping.ts");
     resetBasicToolGroupingForTests();
@@ -658,21 +658,39 @@ describe("enable-builtin-search", () => {
 
     const edit = host.getTool("edit");
     const write = host.getTool("write");
-    const editRendered = renderComponent(edit.renderCall(
+    const editCall = renderComponent(edit.renderCall(
       { path: "sample.ts", edits: [{ oldText: "old", newText: "new" }] },
       plainTheme(),
       { toolCallId: "edit-default", state: {}, cwd: process.cwd(), argsComplete: false, invalidate() {} },
     ));
-    const writeRendered = renderComponent(write.renderCall(
+    const writeCall = renderComponent(write.renderCall(
       { path: "sample.ts", content: "hello\n" },
       plainTheme(),
-      { toolCallId: "write-default", lastComponent: undefined, argsComplete: false, expanded: false, isPartial: false },
+      { toolCallId: "write-default", state: {}, argsComplete: false, expanded: false, isPartial: false },
+    ));
+    const editResult = renderComponent(edit.renderResult(
+      { content: [{ type: "text", text: "edited" }], details: { diff: "@@ -1,1 +1,1 @@\n-old\n+new" } },
+      { expanded: true, isPartial: false },
+      plainTheme(),
+      { args: { path: "sample.ts" } },
+    ));
+    const writeResult = renderComponent(write.renderResult(
+      { content: [{ type: "text", text: "written" }], details: {} },
+      { expanded: true, isPartial: false },
+      plainTheme(),
+      { args: { path: "sample.ts", content: "hello\n" }, state: {} },
     ));
 
-    expect(editRendered).toContain("edit");
-    expect(writeRendered).toContain("write");
-    expect(editRendered).not.toContain("• Edited");
-    expect(writeRendered).not.toContain("• Edited");
+    expect(editCall).toContain("edit sample.ts (1 line)");
+    expect(writeCall).toContain("write sample.ts (1 line");
+    expect(editResult).toContain("diff");
+    expect(editResult).toContain("-1");
+    expect(editResult).toContain("+1");
+    expect(editResult).toContain("new");
+    expect(writeResult).toContain("created");
+    expect(writeResult).toContain("hello");
+    expect(editCall).not.toContain("• Edited");
+    expect(writeCall).not.toContain("• Edited");
   });
 
   test("preserves call details when later streaming updates have incomplete args", async () => {
